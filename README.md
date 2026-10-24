@@ -11,8 +11,11 @@ The core and CLI are written in Rust. The pilot tasks and their project preset u
 ```sh
 cargo build --workspace
 cargo test --workspace
+cargo run -p harness-cli -- run --demo
 ```
 
 ## Project status
 
-This repository is an early MVP scaffold. Model provider, exact artifact schemas, and the first acceptance contract are recorded as open decisions before implementation.
+`harness run --demo` exercises a deterministic smoke path with a built-in worker and two acceptance sensors. It does not call a model provider or provide an OS security sandbox, so it is not an evaluation of the MVP thesis and must not be used with untrusted code.
+
+The live model provider and exact artifact schemas remain open decisions before the full vertical slice.

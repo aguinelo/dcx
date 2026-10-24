@@ -6,7 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+harness-artifacts = { path = "../harness-artifacts" }
 harness-engine = { path = "../harness-engine" }
+serde_json = "1"
 
 [[bin]]
 name = "harness"

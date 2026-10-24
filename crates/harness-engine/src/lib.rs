@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+pub use harness_artifacts::{
+    Contract, Criterion, DeliveryReport, SensorResult, SensorSpec, SensorVisibility,
+};
+
 /// States included in the current MVP scope.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum RunState {
@@ -88,6 +92,62 @@ impl fmt::Display for RunState {
         f.write_str(self.as_str())
     }
 }
+
+/// Records and validates state changes for one run.
+#[derive(Clone, Debug)]
+pub struct RunLifecycle {
+    current: RunState,
+    history: Vec<RunState>,
+}
+
+impl Default for RunLifecycle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RunLifecycle {
+    pub fn new() -> Self {
+        Self {
+            current: RunState::New,
+            history: vec![RunState::New],
+        }
+    }
+
+    pub const fn current(&self) -> RunState {
+        self.current
+    }
+
+    pub fn history(&self) -> &[RunState] {
+        &self.history
+    }
+
+    pub fn transition(&mut self, next: RunState) -> Result<(), InvalidTransition> {
+        if !self.current.can_transition_to(next) {
+            return Err(InvalidTransition {
+                from: self.current,
+                to: next,
+            });
+        }
+        self.current = next;
+        self.history.push(next);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidTransition {
+    pub from: RunState,
+    pub to: RunState,
+}
+
+impl fmt::Display for InvalidTransition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "transição inválida: {} -> {}", self.from, self.to)
+    }
+}
+
+impl std::error::Error for InvalidTransition {}
 
 #[cfg(test)]
 mod tests {
