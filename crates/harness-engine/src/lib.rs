@@ -1,5 +1,6 @@
 //! Deterministic state model for the Harness MVP.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub use harness_artifacts::{
@@ -7,13 +8,14 @@ pub use harness_artifacts::{
     StepReport, Verdict,
 };
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Input visible to an executor. Hidden sensors are deliberately absent.
 #[derive(Clone, Debug)]
 pub struct ExecutionContext {
     pub contract: Contract,
     pub visible_sensors: Vec<SensorSpec>,
+    pub step_id: String,
     pub attempt: u32,
     pub feedback: Vec<String>,
 }
@@ -22,6 +24,7 @@ impl ExecutionContext {
     pub fn new(
         contract: &Contract,
         suite: &SensorSuite,
+        step_id: &str,
         attempt: u32,
         feedback: Vec<String>,
     ) -> Result<Self, harness_artifacts::ValidationError> {
@@ -34,6 +37,7 @@ impl ExecutionContext {
                 .filter(|sensor| sensor.visibility == SensorVisibility::Visible)
                 .cloned()
                 .collect(),
+            step_id: step_id.to_owned(),
             attempt,
             feedback,
         })
@@ -63,6 +67,7 @@ pub trait Verifier {
         suite: &SensorSuite,
         step_report: &StepReport,
         sensor_results: &[SensorResult],
+        workspace: &Path,
     ) -> Result<Verdict, String>;
 }
 
@@ -145,11 +150,20 @@ impl RunCoordinator {
             .collect::<Vec<_>>();
         let mut step_reports = Vec::new();
         let mut feedback = Vec::new();
+        let mut changed_files = BTreeSet::new();
 
         for attempt in 1..=self.max_attempts {
-            let context = ExecutionContext::new(contract, suite, attempt, feedback.clone())
-                .map_err(|error| error.to_string())?;
+            let before = snapshot_workspace(workspace)?;
+            let context =
+                ExecutionContext::new(contract, suite, step_id, attempt, feedback.clone())
+                    .map_err(|error| error.to_string())?;
             let mut step_report = executor.execute(&context, workspace)?;
+            let after = snapshot_workspace(workspace)?;
+            changed_files.extend(changed_paths(&before, &after));
+            step_report.files_changed = changed_files
+                .iter()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .collect();
             step_report.attempts = attempt;
             if step_report.step_id != step_id {
                 return Err(format!(
@@ -207,7 +221,8 @@ impl RunCoordinator {
                     .collect::<Result<Vec<_>, _>>()?,
             );
 
-            let mut verdict = verifier.verify(contract, suite, &step_report, &sensor_results)?;
+            let mut verdict =
+                verifier.verify(contract, suite, &step_report, &sensor_results, workspace)?;
             let verdict_covers_all_criteria = verdict.criteria.len() == contract.criteria.len()
                 && contract.criteria.iter().all(|criterion| {
                     verdict
@@ -365,6 +380,71 @@ fn visible_failure_verdict(
         issues,
         notes: vec![],
     }
+}
+
+const MAX_SNAPSHOT_FILE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_SNAPSHOT_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+
+fn snapshot_workspace(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, String> {
+    fn visit(
+        root: &Path,
+        directory: &Path,
+        files: &mut BTreeMap<PathBuf, Vec<u8>>,
+        total_bytes: &mut u64,
+    ) -> Result<(), String> {
+        let entries = std::fs::read_dir(directory).map_err(|error| {
+            format!("cannot inspect workspace {}: {error}", directory.display())
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("cannot read workspace entry: {error}"))?;
+            let path = entry.path();
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+                format!("cannot inspect workspace path {}: {error}", path.display())
+            })?;
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                visit(root, &path, files, total_bytes)?;
+            } else if metadata.is_file() {
+                if metadata.len() > MAX_SNAPSHOT_FILE_BYTES {
+                    return Err(format!(
+                        "workspace file exceeds snapshot limit: {}",
+                        path.display()
+                    ));
+                }
+                *total_bytes = total_bytes.saturating_add(metadata.len());
+                if *total_bytes > MAX_SNAPSHOT_TOTAL_BYTES {
+                    return Err("workspace exceeds total snapshot limit".to_owned());
+                }
+                let relative = path
+                    .strip_prefix(root)
+                    .map_err(|error| format!("workspace path escaped root: {error}"))?
+                    .to_path_buf();
+                let contents = std::fs::read(&path).map_err(|error| {
+                    format!("cannot read workspace file {}: {error}", path.display())
+                })?;
+                files.insert(relative, contents);
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = BTreeMap::new();
+    visit(root, root, &mut files, &mut 0)?;
+    Ok(files)
+}
+
+fn changed_paths(
+    before: &BTreeMap<PathBuf, Vec<u8>>,
+    after: &BTreeMap<PathBuf, Vec<u8>>,
+) -> BTreeSet<PathBuf> {
+    before
+        .keys()
+        .chain(after.keys())
+        .filter(|path| before.get(*path) != after.get(*path))
+        .cloned()
+        .collect()
 }
 
 /// States included in the current MVP scope.
@@ -536,7 +616,7 @@ mod tests {
                 step_id: "step-1".into(),
                 attempts: 1,
                 summary: "completed".into(),
-                files_changed: vec![],
+                files_changed: vec!["invented.py".into()],
                 decisions: vec![],
                 disputes: vec![],
             })
@@ -636,6 +716,7 @@ mod tests {
             _suite: &SensorSuite,
             _step_report: &StepReport,
             _sensor_results: &[SensorResult],
+            _workspace: &Path,
         ) -> Result<Verdict, String> {
             Ok(Verdict {
                 schema_version: SCHEMA_VERSION,
@@ -733,8 +814,10 @@ mod tests {
             ],
         };
 
-        let context = ExecutionContext::new(&contract, &suite, 1, vec![]).expect("context válido");
+        let context =
+            ExecutionContext::new(&contract, &suite, "step-1", 1, vec![]).expect("context válido");
         assert_eq!(context.visible_sensors.len(), 1);
+        assert_eq!(context.step_id, "step-1");
         assert_eq!(context.visible_sensors[0].id, "visible");
         assert!(
             !context
@@ -804,6 +887,38 @@ mod tests {
         assert_eq!(sensor_runner.hidden_runs, 1);
         assert!(!execution.verdict.approved);
         assert_eq!(execution.states.last(), Some(&RunState::Failed));
+        assert!(execution.step_reports[0].files_changed.is_empty());
+    }
+
+    #[test]
+    fn workspace_snapshot_detects_added_modified_and_deleted_files() {
+        let root = std::env::temp_dir().join(format!(
+            "harness-snapshot-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp workspace");
+        std::fs::write(root.join("modified.txt"), "old").expect("create modified fixture");
+        std::fs::write(root.join("deleted.txt"), "gone").expect("create deleted fixture");
+        let before = super::snapshot_workspace(&root).expect("snapshot before");
+
+        std::fs::write(root.join("modified.txt"), "new").expect("modify fixture");
+        std::fs::write(root.join("added.txt"), "new file").expect("add fixture");
+        std::fs::remove_file(root.join("deleted.txt")).expect("delete fixture");
+        let after = super::snapshot_workspace(&root).expect("snapshot after");
+        let changed = super::changed_paths(&before, &after);
+
+        assert_eq!(
+            changed,
+            ["added.txt", "deleted.txt", "modified.txt"]
+                .into_iter()
+                .map(std::path::PathBuf::from)
+                .collect()
+        );
+        std::fs::remove_dir_all(root).expect("remove temp workspace");
     }
 
     #[test]

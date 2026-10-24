@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::codex::{CodexCliExecutor, CodexCliVerifier};
 use harness_artifacts::{
     Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION, SensorResult,
     SensorSpec, SensorSuite, StepReport, Verdict, VerdictIssue,
@@ -28,8 +29,10 @@ print()
 "#;
 
 pub fn run() -> DemoResult<()> {
-    let workspace = create_workspace()?;
-    let result = run_in_workspace(&workspace);
+    let (workspace, run_id) = create_workspace("demo")?;
+    let mut executor = DemoExecutor;
+    let mut verifier = DemoVerifier;
+    let result = run_in_workspace(&workspace, &run_id, &mut executor, &mut verifier);
     if let Err(error) = &result {
         eprintln!("Workspace do demo preservado em {}", workspace.display());
         return Err(error.to_string().into());
@@ -37,14 +40,29 @@ pub fn run() -> DemoResult<()> {
     result
 }
 
-fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
+pub fn run_pilot() -> DemoResult<()> {
+    let (workspace, run_id) = create_workspace("pilot")?;
+    let mut executor = CodexCliExecutor::default();
+    let mut verifier = CodexCliVerifier::default();
+    let result = run_in_workspace(&workspace, &run_id, &mut executor, &mut verifier);
+    if let Err(error) = &result {
+        eprintln!("Workspace do piloto preservado em {}", workspace.display());
+        return Err(error.to_string().into());
+    }
+    result
+}
+
+fn run_in_workspace(
+    workspace: &Path,
+    run_id: &str,
+    executor: &mut dyn Executor,
+    verifier: &mut dyn Verifier,
+) -> DemoResult<()> {
     let contract = demo_contract()?;
     let sensors = demo_sensors()?;
-    let mut executor = DemoExecutor;
     let mut sensor_runner = DemoSensorRunner {
-        converter_path: workspace.join("worker/convert.py"),
+        converter_path: workspace.join("convert.py"),
     };
-    let mut verifier = DemoVerifier;
     let execution = RunCoordinator::new(3)
         .map_err(std::io::Error::other)?
         .execute(
@@ -55,9 +73,9 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
                 workspace,
             },
             RunParticipants {
-                executor: &mut executor,
+                executor,
                 sensor_runner: &mut sensor_runner,
-                verifier: &mut verifier,
+                verifier,
             },
         )
         .map_err(std::io::Error::other)?;
@@ -73,7 +91,7 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
 
     let report = DeliveryReport {
         schema_version: SCHEMA_VERSION,
-        run_id: format!("demo-{}", std::process::id()),
+        run_id: run_id.to_owned(),
         summary: if execution.verdict.approved {
             "Conversor CSV para JSON passou nos sensores visível e oculto.".to_owned()
         } else {
@@ -92,6 +110,9 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
     fs::write(&report_path, serde_json::to_vec_pretty(&report)?)?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     println!("Relatório salvo em {}", report_path.display());
+    if !execution.verdict.approved {
+        return Err("verificação reprovou a execução".into());
+    }
     Ok(())
 }
 
@@ -118,9 +139,7 @@ impl Executor for DemoExecutor {
         if context.visible_sensors.is_empty() {
             return Err("executor recebeu contexto sem sensores visíveis".to_owned());
         }
-        let worker_dir = workspace.join("worker");
-        fs::create_dir_all(&worker_dir).map_err(|error| error.to_string())?;
-        let converter_path = worker_dir.join("convert.py");
+        let converter_path = workspace.join("convert.py");
         fs::write(&converter_path, CONVERTER).map_err(|error| error.to_string())?;
         Ok(StepReport {
             schema_version: SCHEMA_VERSION,
@@ -128,7 +147,7 @@ impl Executor for DemoExecutor {
             attempts: 1,
             summary: "Worker de demonstração escreveu convert.py no diretório temporário."
                 .to_owned(),
-            files_changed: vec!["worker/convert.py".to_owned()],
+            files_changed: vec!["convert.py".to_owned()],
             decisions: vec![],
             disputes: vec![],
         })
@@ -195,6 +214,7 @@ impl Verifier for DemoVerifier {
         suite: &SensorSuite,
         _step_report: &StepReport,
         sensor_results: &[SensorResult],
+        _workspace: &Path,
     ) -> Result<Verdict, String> {
         let criteria = contract
             .criteria
@@ -264,11 +284,12 @@ fn run_converter(converter: &Path, input: &Path) -> DemoResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn create_workspace() -> DemoResult<PathBuf> {
+fn create_workspace(prefix: &str) -> DemoResult<(PathBuf, String)> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let path = std::env::temp_dir().join(format!("harness-demo-{}-{nanos}", std::process::id()));
+    let run_id = format!("{prefix}-{}-{nanos}", std::process::id());
+    let path = std::env::temp_dir().join(format!("harness-{run_id}"));
     fs::create_dir_all(&path)?;
-    Ok(path)
+    Ok((path, run_id))
 }
 
 #[cfg(test)]

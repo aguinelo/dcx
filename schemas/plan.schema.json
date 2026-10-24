@@ -1,72 +1,38 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Plan",
-  "type": "object",
-  "properties": {
-    "contract_version": {
-      "type": "integer",
-      "format": "uint32",
-      "minimum": 0
-    },
-    "integration_step_id": {
-      "type": "string"
-    },
-    "rationale": {
-      "type": "string"
-    },
-    "schema_version": {
-      "type": "integer",
-      "format": "uint32",
-      "minimum": 0
-    },
-    "steps": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/PlanStep"
-      }
-    }
-  },
-  "required": [
-    "schema_version",
-    "contract_version",
-    "steps",
-    "integration_step_id",
-    "rationale"
-  ],
   "$defs": {
     "PlanStep": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "criteria": {
-          "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "depends_on": {
-          "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "description": {
           "type": "string"
         },
         "files_hint": {
-          "type": "array",
           "default": [],
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "id": {
           "type": "string"
         },
         "sensors": {
-          "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "title": {
           "type": "string"
@@ -79,7 +45,42 @@
         "criteria",
         "sensors",
         "depends_on"
-      ]
+      ],
+      "type": "object"
     }
-  }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "integration_step_id": {
+      "type": "string"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/PlanStep"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "steps",
+    "integration_step_id",
+    "rationale"
+  ],
+  "title": "Plan",
+  "type": "object"
 }

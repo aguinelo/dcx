@@ -1,55 +1,7 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Contract",
-  "type": "object",
-  "properties": {
-    "assumptions": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "type": "string"
-      }
-    },
-    "constraints": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "type": "string"
-      }
-    },
-    "criteria": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/Criterion"
-      }
-    },
-    "interface": {
-      "default": null
-    },
-    "objective": {
-      "type": "string"
-    },
-    "out_of_scope": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "type": "string"
-      }
-    },
-    "schema_version": {
-      "type": "integer",
-      "format": "uint32",
-      "minimum": 0
-    }
-  },
-  "required": [
-    "schema_version",
-    "objective",
-    "criteria"
-  ],
   "$defs": {
     "Criterion": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "description": {
           "type": "string"
@@ -61,7 +13,56 @@
       "required": [
         "id",
         "description"
-      ]
+      ],
+      "type": "object"
     }
-  }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "assumptions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "constraints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "criteria": {
+      "items": {
+        "$ref": "#/$defs/Criterion"
+      },
+      "type": "array"
+    },
+    "interface": {
+      "default": null
+    },
+    "objective": {
+      "type": "string"
+    },
+    "out_of_scope": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "objective",
+    "criteria"
+  ],
+  "title": "Contract",
+  "type": "object"
 }

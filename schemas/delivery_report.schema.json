@@ -1,54 +1,7 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "DeliveryReport",
-  "type": "object",
-  "properties": {
-    "criteria_passed": {
-      "type": "integer",
-      "format": "uint",
-      "minimum": 0
-    },
-    "criteria_total": {
-      "type": "integer",
-      "format": "uint",
-      "minimum": 0
-    },
-    "run_id": {
-      "type": "string"
-    },
-    "schema_version": {
-      "type": "integer",
-      "format": "uint32",
-      "minimum": 0
-    },
-    "sensor_results": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/SensorResult"
-      }
-    },
-    "states": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "summary": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "schema_version",
-    "run_id",
-    "summary",
-    "criteria_passed",
-    "criteria_total",
-    "sensor_results",
-    "states"
-  ],
   "$defs": {
     "SensorResult": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "criterion_id": {
           "type": "string"
@@ -68,7 +21,55 @@
         "criterion_id",
         "passed",
         "evidence"
-      ]
+      ],
+      "type": "object"
     }
-  }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "criteria_passed": {
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "criteria_total": {
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sensor_results": {
+      "items": {
+        "$ref": "#/$defs/SensorResult"
+      },
+      "type": "array"
+    },
+    "states": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "summary",
+    "criteria_passed",
+    "criteria_total",
+    "sensor_results",
+    "states"
+  ],
+  "title": "DeliveryReport",
+  "type": "object"
 }

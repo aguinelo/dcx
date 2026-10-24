@@ -15,6 +15,14 @@ cargo run -p harness-cli -- schemas --check
 cargo run -p harness-cli -- run --demo
 ```
 
+Run the live `cli-01` pilot through the installed Codex CLI:
+
+```sh
+cargo run -p harness-cli -- run --pilot
+```
+
+This sends the contract and workspace context to the Codex provider selected by the user's Codex CLI configuration. Set `HARNESS_CODEX_MODEL` to choose the executor model and `HARNESS_VERIFIER_MODEL` to choose the verifier model. The executor runs with `workspace-write`; the verifier runs with `read-only`.
+
 Regenerate versioned JSON Schemas after changing a Rust artifact:
 
 ```sh
@@ -23,6 +31,8 @@ cargo run -p harness-cli -- schemas --write
 
 ## Project status
 
-`harness run --demo` exercises a deterministic smoke path with a built-in worker and two acceptance sensors. It does not call a model provider or provide an OS security sandbox, so it is not an evaluation of the MVP thesis and must not be used with untrusted code.
+`harness run --demo` exercises a deterministic smoke path with a built-in worker and acceptance sensors. It does not call a model provider or provide an OS security sandbox, so it is not an evaluation of the MVP thesis and must not be used with untrusted code. `harness run --pilot` uses the installed Codex CLI for the executor and verifier; it applies the CLI's workspace-write and read-only sandbox modes.
 
-The live model provider and exact artifact schemas remain open decisions before the full vertical slice.
+The pilot currently targets the local Codex CLI adapter. Other providers remain future adapters behind the engine role interfaces.
+
+The engine derives `step_report.files_changed` from workspace snapshots around each executor attempt, instead of trusting the executor's own list. Snapshots skip symlinks and enforce 16 MiB per file and 64 MiB per workspace limits.

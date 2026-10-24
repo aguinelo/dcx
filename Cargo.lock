@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "harness-artifacts",
  "harness-engine",
+ "serde",
  "serde_json",
 ]
 

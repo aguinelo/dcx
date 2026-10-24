@@ -306,39 +306,50 @@ fn unique_non_empty<'a>(
 /// Generate the checked-in JSON Schemas from the Rust artifact definitions.
 pub fn json_schemas() -> Result<Vec<(&'static str, String)>, serde_json::Error> {
     Ok(vec![
-        (
-            "contract.schema.json",
-            serde_json::to_string_pretty(&schema_for!(Contract))?,
-        ),
+        ("contract.schema.json", serialize_schema::<Contract>()?),
         (
             "sensor_suite.schema.json",
-            serde_json::to_string_pretty(&schema_for!(SensorSuite))?,
+            serialize_schema::<SensorSuite>()?,
         ),
-        (
-            "plan.schema.json",
-            serde_json::to_string_pretty(&schema_for!(Plan))?,
-        ),
-        (
-            "step_report.schema.json",
-            serde_json::to_string_pretty(&schema_for!(StepReport))?,
-        ),
-        (
-            "verdict.schema.json",
-            serde_json::to_string_pretty(&schema_for!(Verdict))?,
-        ),
+        ("plan.schema.json", serialize_schema::<Plan>()?),
+        ("step_report.schema.json", serialize_schema::<StepReport>()?),
+        ("verdict.schema.json", serialize_schema::<Verdict>()?),
         (
             "delivery_report.schema.json",
-            serde_json::to_string_pretty(&schema_for!(DeliveryReport))?,
+            serialize_schema::<DeliveryReport>()?,
         ),
-        (
-            "gate.schema.json",
-            serde_json::to_string_pretty(&schema_for!(Gate))?,
-        ),
-        (
-            "run_event.schema.json",
-            serde_json::to_string_pretty(&schema_for!(RunEvent))?,
-        ),
+        ("gate.schema.json", serialize_schema::<Gate>()?),
+        ("run_event.schema.json", serialize_schema::<RunEvent>()?),
     ])
+}
+
+fn serialize_schema<T: JsonSchema>() -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(schema_for!(T))?;
+    normalize_strict_schema(&mut value);
+    serde_json::to_string_pretty(&value)
+}
+
+fn normalize_strict_schema(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            object.remove("$schema");
+            if object.get("type") == Some(&serde_json::Value::String("object".to_owned())) {
+                object.insert(
+                    "additionalProperties".to_owned(),
+                    serde_json::Value::Bool(false),
+                );
+            }
+            for child in object.values_mut() {
+                normalize_strict_schema(child);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                normalize_strict_schema(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -415,5 +426,33 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "contract.schema.json")
         );
+        for (_, schema) in schemas {
+            let value: serde_json::Value =
+                serde_json::from_str(&schema).expect("schema JSON válido");
+            assert!(value.get("$schema").is_none());
+            assert_closed_objects(&value);
+        }
+    }
+
+    fn assert_closed_objects(value: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(object) => {
+                if object.get("type") == Some(&serde_json::Value::String("object".into())) {
+                    assert_eq!(
+                        object.get("additionalProperties"),
+                        Some(&serde_json::Value::Bool(false))
+                    );
+                }
+                for child in object.values() {
+                    assert_closed_objects(child);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    assert_closed_objects(child);
+                }
+            }
+            _ => {}
+        }
     }
 }
