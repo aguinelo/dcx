@@ -6,11 +6,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::codex::{CodexCliExecutor, CodexCliVerifier};
 use harness_artifacts::{
-    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION, SensorResult,
-    SensorSpec, SensorSuite, StepReport, Verdict, VerdictIssue,
+    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION, SensorLock,
+    SensorResult, SensorSpec, SensorSuite, StepReport, Verdict, VerdictIssue,
 };
-use harness_engine::{ExecutionContext, Executor, RunCoordinator, SensorRunner, Verifier};
-use harness_engine::{RunParticipants, RunRequest};
+use harness_engine::{
+    ExecutionContext, Executor, RunCoordinator, RunParticipants, RunRequest, SensorRunner,
+    Verifier, check_sensors_fail,
+};
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -60,6 +62,9 @@ fn run_in_workspace(
 ) -> DemoResult<()> {
     let contract = demo_contract()?;
     let sensors = demo_sensors()?;
+    let lock = SensorLock::from_suite(&sensors)?;
+    lock.verify(&sensors)?;
+    check_sensors_fail_on_baseline(&sensors)?;
     let mut sensor_runner = DemoSensorRunner {
         converter_path: workspace.join("convert.py"),
     };
@@ -113,6 +118,22 @@ fn run_in_workspace(
     if !execution.verdict.approved {
         return Err("verificação reprovou a execução".into());
     }
+    Ok(())
+}
+
+fn check_sensors_fail_on_baseline(sensors: &SensorSuite) -> DemoResult<()> {
+    let (baseline, _) = create_workspace("baseline")?;
+    let mut runner = DemoSensorRunner {
+        converter_path: baseline.join("convert.py"),
+    };
+    let result = check_sensors_fail(sensors, &mut runner, &baseline);
+    fs::remove_dir_all(&baseline)?;
+    let results = result?;
+    println!(
+        "Sensores travados ({}); {} falharam antes da implementação.",
+        sensors.checksum()?,
+        results.len()
+    );
     Ok(())
 }
 

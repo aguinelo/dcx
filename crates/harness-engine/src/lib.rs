@@ -330,6 +330,54 @@ impl RunCoordinator {
     }
 }
 
+/// Runs every acceptance sensor against the pre-implementation workspace.
+///
+/// A sensor that already passes before any implementation is treated as a broken
+/// sensor and blocks acceptance authoring. A sensor that cannot run yet counts as
+/// a failure, which is the expected baseline for new work.
+pub fn check_sensors_fail(
+    suite: &SensorSuite,
+    runner: &mut dyn SensorRunner,
+    workspace: &Path,
+) -> Result<Vec<SensorResult>, String> {
+    if suite.sensors.is_empty() {
+        return Err("sensor_suite must contain at least one sensor".to_owned());
+    }
+    let mut results = Vec::with_capacity(suite.sensors.len());
+    for sensor in &suite.sensors {
+        let result = match runner.run_sensor(sensor, workspace) {
+            Ok(result) => {
+                if result.sensor_id != sensor.id || result.criterion_id != sensor.criterion_id {
+                    return Err(format!(
+                        "sensor runner returned {} / {} for sensor {} / {}",
+                        result.sensor_id, result.criterion_id, sensor.id, sensor.criterion_id
+                    ));
+                }
+                result
+            }
+            Err(error) => SensorResult {
+                sensor_id: sensor.id.clone(),
+                criterion_id: sensor.criterion_id.clone(),
+                passed: false,
+                evidence: format!("Sensor did not pass against the baseline: {error}"),
+            },
+        };
+        results.push(result);
+    }
+    let already_passing = results
+        .iter()
+        .filter(|result| result.passed)
+        .map(|result| result.sensor_id.as_str())
+        .collect::<Vec<_>>();
+    if !already_passing.is_empty() {
+        return Err(format!(
+            "acceptance sensors already pass before implementation: {}",
+            already_passing.join(", ")
+        ));
+    }
+    Ok(results)
+}
+
 fn visible_failure_verdict(
     contract: &Contract,
     suite: &SensorSuite,
@@ -600,7 +648,7 @@ impl std::error::Error for InvalidTransition {}
 mod tests {
     use super::{
         ExecutionContext, Executor, RunCoordinator, RunParticipants, RunRequest, RunState,
-        SensorRunner, Verifier,
+        SensorRunner, Verifier, check_sensors_fail,
     };
     use harness_artifacts::{
         Contract, Criterion, CriterionVerdict, SCHEMA_VERSION, SensorKind, SensorResult,
@@ -710,6 +758,86 @@ mod tests {
                 evidence: "fixture result".into(),
             })
         }
+    }
+
+    struct AlwaysPassSensorRunner;
+
+    impl SensorRunner for AlwaysPassSensorRunner {
+        fn run_sensor(
+            &mut self,
+            sensor: &SensorSpec,
+            _workspace: &Path,
+        ) -> Result<SensorResult, String> {
+            Ok(SensorResult {
+                sensor_id: sensor.id.clone(),
+                criterion_id: sensor.criterion_id.clone(),
+                passed: true,
+                evidence: "fixture already passes".into(),
+            })
+        }
+    }
+
+    struct UnavailableSensorRunner;
+
+    impl SensorRunner for UnavailableSensorRunner {
+        fn run_sensor(
+            &mut self,
+            _sensor: &SensorSpec,
+            _workspace: &Path,
+        ) -> Result<SensorResult, String> {
+            Err("implementation does not exist yet".into())
+        }
+    }
+
+    fn check_suite() -> SensorSuite {
+        SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![
+                SensorSpec {
+                    id: "visible".into(),
+                    criterion_id: "criterion".into(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: SensorVisibility::Visible,
+                    purpose: "acceptance".into(),
+                    check: "visible check".into(),
+                },
+                SensorSpec {
+                    id: "hidden".into(),
+                    criterion_id: "criterion".into(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: SensorVisibility::Hidden,
+                    purpose: "acceptance".into(),
+                    check: "hidden check".into(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn check_sensors_fail_rejects_sensors_that_pass_without_implementation() {
+        let suite = check_suite();
+        let mut runner = AlwaysPassSensorRunner;
+        let error = check_sensors_fail(&suite, &mut runner, Path::new("."))
+            .expect_err("sensor que já passa deve ser suspeito");
+        assert!(error.contains("visible"));
+        assert!(error.contains("hidden"));
+    }
+
+    #[test]
+    fn check_sensors_fail_accepts_failures_before_implementation() {
+        let suite = check_suite();
+        let mut runner = UnavailableSensorRunner;
+        let results = check_sensors_fail(&suite, &mut runner, Path::new("."))
+            .expect("sensores indisponíveis contam como falha");
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| !result.passed));
+        assert!(
+            results
+                .iter()
+                .all(|result| result.evidence.contains("did not pass"))
+        );
     }
 
     struct AlwaysApproveVerifier;

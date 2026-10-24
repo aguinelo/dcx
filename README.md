@@ -37,6 +37,8 @@ The pilot currently targets the local Codex CLI adapter. Other providers remain 
 
 The engine derives `step_report.files_changed` from workspace snapshots around each executor attempt, instead of trusting the executor's own list. Snapshots skip symlinks and enforce 16 MiB per file and 64 MiB per workspace limits.
 
+Acceptance sensors are frozen with a SHA-256 `SensorLock` before execution. The demo and pilot also run every sensor against an empty baseline and refuse a sensor that already passes, which catches checks written against the implementation instead of the contract.
+
 Start an interactive understanding and contract approval flow for the current project:
 
 ```sh

@@ -2,6 +2,7 @@
 
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -353,6 +354,94 @@ impl SensorSuite {
     }
 }
 
+impl SensorSpec {
+    pub fn checksum(&self) -> Result<String, ValidationError> {
+        checksum_of(self)
+    }
+}
+
+impl SensorSuite {
+    pub fn checksum(&self) -> Result<String, ValidationError> {
+        checksum_of(self)
+    }
+}
+
+/// Frozen acceptance sensors. The engine verifies it before every sensor round.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct SensorLock {
+    pub schema_version: u32,
+    pub suite_checksum: String,
+    pub sensors: Vec<SensorLockEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct SensorLockEntry {
+    pub sensor_id: String,
+    pub checksum: String,
+}
+
+impl SensorLock {
+    pub fn from_suite(suite: &SensorSuite) -> Result<Self, ValidationError> {
+        Ok(Self {
+            schema_version: SCHEMA_VERSION,
+            suite_checksum: suite.checksum()?,
+            sensors: suite
+                .sensors
+                .iter()
+                .map(|sensor| {
+                    Ok(SensorLockEntry {
+                        sensor_id: sensor.id.clone(),
+                        checksum: sensor.checksum()?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ValidationError>>()?,
+        })
+    }
+
+    pub fn verify(&self, suite: &SensorSuite) -> Result<(), ValidationError> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(ValidationError::new(
+                "unsupported sensor_lock schema_version",
+            ));
+        }
+        if self.suite_checksum != suite.checksum()? {
+            return Err(ValidationError::new(
+                "sensor suite does not match the locked checksum",
+            ));
+        }
+        if self.sensors.len() != suite.sensors.len() {
+            return Err(ValidationError::new(
+                "sensor lock does not match the suite sensor count",
+            ));
+        }
+        for sensor in &suite.sensors {
+            let locked = self
+                .sensors
+                .iter()
+                .find(|entry| entry.sensor_id == sensor.id)
+                .ok_or_else(|| {
+                    ValidationError::new(format!("sensor {} is not part of the lock", sensor.id))
+                })?;
+            if locked.checksum != sensor.checksum()? {
+                return Err(ValidationError::new(format!(
+                    "sensor {} does not match its locked checksum",
+                    sensor.id
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn checksum_of<T: Serialize>(value: &T) -> Result<String, ValidationError> {
+    let bytes =
+        serde_json::to_vec(value).map_err(|error| ValidationError::new(error.to_string()))?;
+    Ok(Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PlanStep {
     pub id: String,
@@ -507,6 +596,7 @@ pub fn json_schemas() -> Result<Vec<(&'static str, String)>, serde_json::Error> 
             "sensor_suite.schema.json",
             serialize_schema::<SensorSuite>()?,
         ),
+        ("sensor_lock.schema.json", serialize_schema::<SensorLock>()?),
         ("plan.schema.json", serialize_schema::<Plan>()?),
         ("step_report.schema.json", serialize_schema::<StepReport>()?),
         ("verdict.schema.json", serialize_schema::<Verdict>()?),
@@ -629,6 +719,36 @@ mod tests {
     }
 
     #[test]
+    fn sensor_lock_detects_changed_sensor_content() {
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![sensor(SensorVisibility::Visible)],
+        };
+        let lock = SensorLock::from_suite(&suite).expect("checksum da suíte");
+        assert!(lock.verify(&suite).is_ok());
+
+        let mut changed = suite.clone();
+        changed.sensors[0].check = "Outra verificação".into();
+        assert!(lock.verify(&changed).is_err());
+    }
+
+    #[test]
+    fn sensor_lock_detects_added_sensor() {
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![sensor(SensorVisibility::Visible)],
+        };
+        let lock = SensorLock::from_suite(&suite).expect("checksum da suíte");
+
+        let mut extended = suite;
+        extended.sensors.push(SensorSpec {
+            id: "extra".into(),
+            ..sensor(SensorVisibility::Hidden)
+        });
+        assert!(lock.verify(&extended).is_err());
+    }
+
+    #[test]
     fn contract_bundle_validates_contract_and_sensor_coverage_together() {
         let bundle = ContractBundle {
             schema_version: SCHEMA_VERSION,
@@ -673,7 +793,7 @@ mod tests {
     #[test]
     fn schemas_are_generated_for_all_mvp_artifacts() {
         let schemas = json_schemas().expect("schemas serializáveis");
-        assert_eq!(schemas.len(), 10);
+        assert_eq!(schemas.len(), 11);
         assert!(
             schemas
                 .iter()

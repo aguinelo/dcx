@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "SensorLockEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "checksum": {
+          "type": "string"
+        },
+        "sensor_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checksum",
+        "sensor_id"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Frozen acceptance sensors. The engine verifies it before every sensor round.",
+  "properties": {
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sensors": {
+      "items": {
+        "$ref": "#/$defs/SensorLockEntry"
+      },
+      "type": "array"
+    },
+    "suite_checksum": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "sensors",
+    "suite_checksum"
+  ],
+  "title": "SensorLock",
+  "type": "object"
+}
