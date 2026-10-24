@@ -366,6 +366,100 @@ impl SensorSuite {
     }
 }
 
+/// Executable implementation of the acceptance sensors.
+///
+/// The acceptance author returns source code; the engine materializes it outside
+/// the task workspace and runs each script through `ScriptSensorRunner`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct SensorImplementation {
+    pub schema_version: u32,
+    pub scripts: Vec<SensorScript>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct SensorScript {
+    pub sensor_id: String,
+    pub filename: String,
+    pub source: String,
+}
+
+impl SensorImplementation {
+    pub fn validate_for(&self, suite: &SensorSuite) -> Result<(), ValidationError> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(ValidationError::new(
+                "unsupported sensor_implementation schema_version",
+            ));
+        }
+        if self.scripts.len() != suite.sensors.len() {
+            return Err(ValidationError::new(format!(
+                "sensor_implementation has {} scripts for {} sensors",
+                self.scripts.len(),
+                suite.sensors.len()
+            )));
+        }
+        unique_non_empty(
+            self.scripts.iter().map(|script| script.sensor_id.as_str()),
+            "sensor script sensor_id",
+        )?;
+        unique_non_empty(
+            self.scripts.iter().map(|script| script.filename.as_str()),
+            "sensor script filename",
+        )?;
+        for script in &self.scripts {
+            if !suite
+                .sensors
+                .iter()
+                .any(|sensor| sensor.id == script.sensor_id)
+            {
+                return Err(ValidationError::new(format!(
+                    "sensor script references unknown sensor {}",
+                    script.sensor_id
+                )));
+            }
+            if script.filename.contains('/')
+                || script.filename.contains('\\')
+                || script.filename.contains("..")
+                || !script.filename.ends_with(".py")
+            {
+                return Err(ValidationError::new(format!(
+                    "sensor script filename must be a local .py file: {}",
+                    script.filename
+                )));
+            }
+            if script.source.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "sensor script {} has empty source",
+                    script.sensor_id
+                )));
+            }
+        }
+        for sensor in &suite.sensors {
+            if !self
+                .scripts
+                .iter()
+                .any(|script| script.sensor_id == sensor.id)
+            {
+                return Err(ValidationError::new(format!(
+                    "sensor {} has no executable script",
+                    sensor.id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn source_for(&self, sensor_id: &str) -> Option<&str> {
+        self.scripts
+            .iter()
+            .find(|script| script.sensor_id == sensor_id)
+            .map(|script| script.source.as_str())
+    }
+
+    pub fn checksum(&self) -> Result<String, ValidationError> {
+        checksum_of(self)
+    }
+}
+
 /// Frozen acceptance sensors. The engine verifies it before every sensor round.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct SensorLock {
@@ -597,6 +691,10 @@ pub fn json_schemas() -> Result<Vec<(&'static str, String)>, serde_json::Error> 
             serialize_schema::<SensorSuite>()?,
         ),
         ("sensor_lock.schema.json", serialize_schema::<SensorLock>()?),
+        (
+            "sensor_implementation.schema.json",
+            serialize_schema::<SensorImplementation>()?,
+        ),
         ("plan.schema.json", serialize_schema::<Plan>()?),
         ("step_report.schema.json", serialize_schema::<StepReport>()?),
         ("verdict.schema.json", serialize_schema::<Verdict>()?),
@@ -749,6 +847,51 @@ mod tests {
     }
 
     #[test]
+    fn sensor_implementation_requires_one_safe_script_per_sensor() {
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![sensor(SensorVisibility::Visible)],
+        };
+        let implementation = SensorImplementation {
+            schema_version: SCHEMA_VERSION,
+            scripts: vec![SensorScript {
+                sensor_id: "records-sensor".into(),
+                filename: "records_sensor.py".into(),
+                source: "print('ok')".into(),
+            }],
+        };
+        assert!(implementation.validate_for(&suite).is_ok());
+        assert_eq!(
+            implementation.source_for("records-sensor"),
+            Some("print('ok')")
+        );
+
+        let missing = SensorImplementation {
+            scripts: vec![],
+            ..implementation.clone()
+        };
+        assert!(missing.validate_for(&suite).is_err());
+
+        let unknown = SensorImplementation {
+            scripts: vec![SensorScript {
+                sensor_id: "other".into(),
+                ..implementation.scripts[0].clone()
+            }],
+            ..implementation.clone()
+        };
+        assert!(unknown.validate_for(&suite).is_err());
+
+        let traversal = SensorImplementation {
+            scripts: vec![SensorScript {
+                filename: "../escape.py".into(),
+                ..implementation.scripts[0].clone()
+            }],
+            ..implementation
+        };
+        assert!(traversal.validate_for(&suite).is_err());
+    }
+
+    #[test]
     fn contract_bundle_validates_contract_and_sensor_coverage_together() {
         let bundle = ContractBundle {
             schema_version: SCHEMA_VERSION,
@@ -793,7 +936,7 @@ mod tests {
     #[test]
     fn schemas_are_generated_for_all_mvp_artifacts() {
         let schemas = json_schemas().expect("schemas serializáveis");
-        assert_eq!(schemas.len(), 11);
+        assert_eq!(schemas.len(), 12);
         assert!(
             schemas
                 .iter()

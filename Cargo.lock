@@ -78,6 +78,7 @@ version = "0.1.0"
 dependencies = [
  "harness-artifacts",
  "harness-engine",
+ "harness-sensors",
  "serde",
  "serde_json",
 ]
@@ -88,6 +89,14 @@ version = "0.1.0"
 dependencies = [
  "harness-artifacts",
  "serde_json",
+]
+
+[[package]]
+name = "harness-sensors"
+version = "0.1.0"
+dependencies = [
+ "harness-artifacts",
+ "harness-engine",
 ]
 
 [[package]]

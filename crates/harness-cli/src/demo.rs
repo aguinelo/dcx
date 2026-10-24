@@ -1,18 +1,19 @@
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::codex::{CodexCliExecutor, CodexCliVerifier};
 use harness_artifacts::{
-    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION, SensorLock,
-    SensorResult, SensorSpec, SensorSuite, StepReport, Verdict, VerdictIssue,
+    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION,
+    SensorImplementation, SensorLock, SensorResult, SensorScript, SensorSuite, StepReport, Verdict,
+    VerdictIssue,
 };
 use harness_engine::{
     ExecutionContext, Executor, RunCoordinator, RunParticipants, RunRequest, SensorRunner,
     Verifier, check_sensors_fail,
 };
+use harness_sensors::ScriptSensorRunner;
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -30,15 +31,120 @@ json.dump(rows, fp=__import__("sys").stdout, ensure_ascii=False)
 print()
 "#;
 
+const VISIBLE_RECORD_CONVERSION: &str = r#"import json
+import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+source = os.path.join(workspace, "visible.csv")
+with open(source, "w", encoding="utf-8") as handle:
+    handle.write("name,city\nAda,Lisbon\n")
+
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "convert.py"), source],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"conversor falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+try:
+    actual = json.loads(result.stdout)
+except json.JSONDecodeError:
+    print(f"saída não é JSON: {result.stdout!r}", file=sys.stderr)
+    sys.exit(1)
+expected = [{"name": "Ada", "city": "Lisbon"}]
+if actual != expected:
+    print(f"saída inesperada: {actual!r}", file=sys.stderr)
+    sys.exit(1)
+print("CSV simples convertido para um array JSON de objetos.")
+"#;
+
+const VISIBLE_QUOTED_FIELDS: &str = r#"import csv
+import json
+import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+source = os.path.join(workspace, "visible-quoted.csv")
+with open(source, "w", newline="", encoding="utf-8") as handle:
+    writer = csv.writer(handle)
+    writer.writerow(["name", "city", "quote"])
+    writer.writerow(["Ada", "London, UK", 'She said "hello"'])
+
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "convert.py"), source],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"conversor falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+try:
+    actual = json.loads(result.stdout)
+except json.JSONDecodeError:
+    print(f"saída não é JSON: {result.stdout!r}", file=sys.stderr)
+    sys.exit(1)
+expected = [{"name": "Ada", "city": "London, UK", "quote": 'She said "hello"'}]
+if actual != expected:
+    print(f"saída inesperada: {actual!r}", file=sys.stderr)
+    sys.exit(1)
+print("Vírgula e aspas escapadas preservadas em campos CSV.")
+"#;
+
+const HIDDEN_QUOTED_FIELDS: &str = r#"import csv
+import json
+import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+source = os.path.join(workspace, "hidden.csv")
+with open(source, "w", newline="", encoding="utf-8") as handle:
+    writer = csv.writer(handle)
+    writer.writerow(["name", "quote", "note"])
+    writer.writerow(["Ada", 'She said "hello"', "line one\nline two"])
+
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "convert.py"), source],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"conversor falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+try:
+    actual = json.loads(result.stdout)
+except json.JSONDecodeError:
+    print(f"saída não é JSON: {result.stdout!r}", file=sys.stderr)
+    sys.exit(1)
+expected = [{"name": "Ada", "quote": 'She said "hello"', "note": "line one\nline two"}]
+if actual != expected:
+    print(f"saída inesperada: {actual!r}", file=sys.stderr)
+    sys.exit(1)
+print("Campos com aspas, vírgula ou quebra de linha preservados.")
+"#;
+
 pub fn run() -> DemoResult<()> {
     let (workspace, run_id) = create_workspace("demo")?;
     let mut executor = DemoExecutor;
     let mut verifier = DemoVerifier;
-    let result = run_in_workspace(&workspace, &run_id, &mut executor, &mut verifier);
+    let (sensor_dir, mut sensor_runner) = script_runner()?;
+    let result = run_in_workspace(
+        &workspace,
+        &run_id,
+        &mut executor,
+        &mut verifier,
+        &mut sensor_runner,
+    );
     if let Err(error) = &result {
         eprintln!("Workspace do demo preservado em {}", workspace.display());
+        eprintln!("Sensores preservados em {}", sensor_dir.display());
         return Err(error.to_string().into());
     }
+    let _ = fs::remove_dir_all(&sensor_dir);
     result
 }
 
@@ -46,12 +152,29 @@ pub fn run_pilot() -> DemoResult<()> {
     let (workspace, run_id) = create_workspace("pilot")?;
     let mut executor = CodexCliExecutor::default();
     let mut verifier = CodexCliVerifier::default();
-    let result = run_in_workspace(&workspace, &run_id, &mut executor, &mut verifier);
+    let (sensor_dir, mut sensor_runner) = script_runner()?;
+    let result = run_in_workspace(
+        &workspace,
+        &run_id,
+        &mut executor,
+        &mut verifier,
+        &mut sensor_runner,
+    );
     if let Err(error) = &result {
         eprintln!("Workspace do piloto preservado em {}", workspace.display());
+        eprintln!("Sensores preservados em {}", sensor_dir.display());
         return Err(error.to_string().into());
     }
+    let _ = fs::remove_dir_all(&sensor_dir);
     result
+}
+
+fn script_runner() -> DemoResult<(PathBuf, ScriptSensorRunner)> {
+    let sensors = demo_sensors()?;
+    let implementation = demo_sensor_implementation()?;
+    let (directory, _) = create_workspace("sensors")?;
+    let runner = ScriptSensorRunner::materialize(&implementation, &sensors, &directory)?;
+    Ok((directory, runner))
 }
 
 fn run_in_workspace(
@@ -59,15 +182,13 @@ fn run_in_workspace(
     run_id: &str,
     executor: &mut dyn Executor,
     verifier: &mut dyn Verifier,
+    sensor_runner: &mut dyn SensorRunner,
 ) -> DemoResult<()> {
     let contract = demo_contract()?;
     let sensors = demo_sensors()?;
     let lock = SensorLock::from_suite(&sensors)?;
     lock.verify(&sensors)?;
-    check_sensors_fail_on_baseline(&sensors)?;
-    let mut sensor_runner = DemoSensorRunner {
-        converter_path: workspace.join("convert.py"),
-    };
+    check_sensors_fail_on_baseline(&sensors, sensor_runner)?;
     let execution = RunCoordinator::new(3)
         .map_err(std::io::Error::other)?
         .execute(
@@ -79,7 +200,7 @@ fn run_in_workspace(
             },
             RunParticipants {
                 executor,
-                sensor_runner: &mut sensor_runner,
+                sensor_runner,
                 verifier,
             },
         )
@@ -121,12 +242,12 @@ fn run_in_workspace(
     Ok(())
 }
 
-fn check_sensors_fail_on_baseline(sensors: &SensorSuite) -> DemoResult<()> {
+fn check_sensors_fail_on_baseline(
+    sensors: &SensorSuite,
+    sensor_runner: &mut dyn SensorRunner,
+) -> DemoResult<()> {
     let (baseline, _) = create_workspace("baseline")?;
-    let mut runner = DemoSensorRunner {
-        converter_path: baseline.join("convert.py"),
-    };
-    let result = check_sensors_fail(sensors, &mut runner, &baseline);
+    let result = check_sensors_fail(sensors, sensor_runner, &baseline);
     fs::remove_dir_all(&baseline)?;
     let results = result?;
     println!(
@@ -147,6 +268,29 @@ fn demo_sensors() -> DemoResult<SensorSuite> {
     Ok(serde_json::from_str(include_str!(
         "../../../examples/cli-01/sensor_suite.json"
     ))?)
+}
+
+fn demo_sensor_implementation() -> DemoResult<SensorImplementation> {
+    Ok(SensorImplementation {
+        schema_version: SCHEMA_VERSION,
+        scripts: vec![
+            SensorScript {
+                sensor_id: "visible-record-conversion".into(),
+                filename: "visible_record_conversion.py".into(),
+                source: VISIBLE_RECORD_CONVERSION.into(),
+            },
+            SensorScript {
+                sensor_id: "visible-quoted-fields".into(),
+                filename: "visible_quoted_fields.py".into(),
+                source: VISIBLE_QUOTED_FIELDS.into(),
+            },
+            SensorScript {
+                sensor_id: "hidden-quoted-fields".into(),
+                filename: "hidden_quoted_fields.py".into(),
+                source: HIDDEN_QUOTED_FIELDS.into(),
+            },
+        ],
+    })
 }
 
 struct DemoExecutor;
@@ -171,57 +315,6 @@ impl Executor for DemoExecutor {
             files_changed: vec!["convert.py".to_owned()],
             decisions: vec![],
             disputes: vec![],
-        })
-    }
-}
-
-struct DemoSensorRunner {
-    converter_path: PathBuf,
-}
-
-impl SensorRunner for DemoSensorRunner {
-    fn run_sensor(
-        &mut self,
-        sensor: &SensorSpec,
-        workspace: &Path,
-    ) -> Result<SensorResult, String> {
-        let (filename, csv, expected, evidence) = match sensor.id.as_str() {
-            "visible-record-conversion" => (
-                "visible.csv",
-                "name,city\nAda,Lisbon\n",
-                serde_json::json!([{"name":"Ada", "city":"Lisbon"}]),
-                "CSV simples convertido para um array JSON de objetos.",
-            ),
-            "visible-quoted-fields" => (
-                "visible-quoted.csv",
-                "name,city,quote\nAda,\"London, UK\",\"She said \"\"hello\"\"\"\n",
-                serde_json::json!([{"name":"Ada", "city":"London, UK", "quote":"She said \"hello\""}]),
-                "Vírgula e aspas escapadas preservadas em campos CSV.",
-            ),
-            "hidden-quoted-fields" => (
-                "hidden.csv",
-                "name,quote,note\nAda,\"She said \"\"hello\"\"\",\"line one\nline two\"\n",
-                serde_json::json!([{"name":"Ada", "quote":"She said \"hello\"", "note":"line one\nline two"}]),
-                "Campos com aspas, vírgula ou quebra de linha preservados.",
-            ),
-            other => return Err(format!("sensor desconhecido: {other}")),
-        };
-        let input = workspace.join(filename);
-        fs::write(&input, csv).map_err(|error| error.to_string())?;
-        let output =
-            run_converter(&self.converter_path, &input).map_err(|error| error.to_string())?;
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
-        let passed = parsed == expected;
-        Ok(SensorResult {
-            sensor_id: sensor.id.clone(),
-            criterion_id: sensor.criterion_id.clone(),
-            passed,
-            evidence: if passed {
-                evidence.to_owned()
-            } else {
-                "A saída não corresponde ao resultado esperado.".to_owned()
-            },
         })
     }
 }
@@ -292,19 +385,6 @@ impl Verifier for DemoVerifier {
     }
 }
 
-fn run_converter(converter: &Path, input: &Path) -> DemoResult<Vec<u8>> {
-    let output = Command::new("python3").arg(converter).arg(input).output()?;
-    if !output.status.success() {
-        return Err(format!(
-            "conversor encerrou com {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        )
-        .into());
-    }
-    Ok(output.stdout)
-}
-
 fn create_workspace(prefix: &str) -> DemoResult<(PathBuf, String)> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let run_id = format!("{prefix}-{}-{nanos}", std::process::id());
@@ -315,7 +395,7 @@ fn create_workspace(prefix: &str) -> DemoResult<(PathBuf, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{demo_contract, demo_sensors};
+    use super::{demo_contract, demo_sensor_implementation, demo_sensors};
     use harness_artifacts::{SCHEMA_VERSION, SensorVisibility};
 
     #[test]
@@ -341,5 +421,15 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn demo_sensor_implementation_covers_every_sensor() {
+        let sensors = demo_sensors().expect("sensor_suite demo parseável");
+        let implementation = demo_sensor_implementation().expect("implementação demo");
+        implementation
+            .validate_for(&sensors)
+            .expect("todo sensor tem script");
+        assert_eq!(implementation.scripts.len(), 3);
     }
 }

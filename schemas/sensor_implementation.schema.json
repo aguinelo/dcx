@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "SensorScript": {
+      "additionalProperties": false,
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "sensor_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "sensor_id",
+        "source"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Executable implementation of the acceptance sensors.\n\nThe acceptance author returns source code; the engine materializes it outside\nthe task workspace and runs each script through `ScriptSensorRunner`.",
+  "properties": {
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scripts": {
+      "items": {
+        "$ref": "#/$defs/SensorScript"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scripts"
+  ],
+  "title": "SensorImplementation",
+  "type": "object"
+}
