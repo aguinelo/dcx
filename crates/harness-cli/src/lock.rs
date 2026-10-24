@@ -27,6 +27,12 @@ impl ProjectLock {
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let owner = fs::read_to_string(&path).unwrap_or_default();
+                if let Some(pid) = owner_pid(&owner) {
+                    if !process_alive(pid) {
+                        let _ = fs::remove_file(&path);
+                        return Self::acquire(project);
+                    }
+                }
                 Err(format!(
                     "another harness run holds {} ({})",
                     path.display(),
@@ -36,6 +42,28 @@ impl ProjectLock {
             Err(error) => Err(format!("cannot lock {}: {error}", path.display())),
         }
     }
+}
+
+fn owner_pid(contents: &str) -> Option<u32> {
+    contents
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("pid="))
+        .and_then(|pid| pid.parse().ok())
+}
+
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(not(unix))]
+fn process_alive(_pid: u32) -> bool {
+    true
 }
 
 impl Drop for ProjectLock {
@@ -63,6 +91,10 @@ mod tests {
             assert!(ProjectLock::acquire(&project).is_err());
         }
         let _lock = ProjectLock::acquire(&project).expect("lock after release");
+        drop(_lock);
+
+        fs::write(project.join(".harness/lock"), "pid=4294967295 started=0\n").expect("stale lock");
+        let _lock = ProjectLock::acquire(&project).expect("stale lock is recovered");
         drop(_lock);
         let _ = fs::remove_dir_all(project);
     }
