@@ -17,10 +17,10 @@
         }
       },
       "required": [
-        "sensor_id",
         "criterion_id",
+        "evidence",
         "passed",
-        "evidence"
+        "sensor_id"
       ],
       "type": "object"
     }
@@ -62,13 +62,13 @@
     }
   },
   "required": [
-    "schema_version",
-    "run_id",
-    "summary",
     "criteria_passed",
     "criteria_total",
+    "run_id",
+    "schema_version",
     "sensor_results",
-    "states"
+    "states",
+    "summary"
   ],
   "title": "DeliveryReport",
   "type": "object"

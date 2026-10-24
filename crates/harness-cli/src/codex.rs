@@ -6,11 +6,84 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_artifacts::{Contract, SensorResult, SensorSuite, StepReport, Verdict, json_schemas};
+use harness_artifacts::{
+    Contract, ContractBundle, SensorResult, SensorSuite, StepReport, Understanding, Verdict,
+    json_schemas,
+};
 use harness_engine::{ExecutionContext, Executor, Verifier};
 use serde::de::DeserializeOwned;
 
 type CodexResult<T> = Result<T, Box<dyn Error>>;
+
+pub struct CodexCliAnalyst {
+    binary: OsString,
+    model: Option<String>,
+}
+
+impl Default for CodexCliAnalyst {
+    fn default() -> Self {
+        Self {
+            binary: std::env::var_os("HARNESS_CODEX_BIN").unwrap_or_else(|| "codex".into()),
+            model: std::env::var("HARNESS_ANALYST_MODEL")
+                .ok()
+                .or_else(|| std::env::var("HARNESS_CODEX_MODEL").ok()),
+        }
+    }
+}
+
+impl CodexCliAnalyst {
+    pub fn understand(
+        &mut self,
+        request: &str,
+        workspace: &Path,
+        previous: Option<&Understanding>,
+    ) -> Result<Understanding, String> {
+        let role = include_str!("../../../prompts/analyst.understanding.md")
+            .replace("{{locale}}", "pt-BR");
+        let prompt = format!(
+            "{role}\n\nContexto desta execução:\n- Locale: pt-BR\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nPedido:\n{request}\n\nEntendimento anterior e respostas já recebidas (se houver):\n{}\n\nRetorne apenas o artifact understanding, incluindo respostas anteriores e perguntas antigas sem reabri-las.",
+            workspace.display(),
+            serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
+        );
+        invoke_codex(
+            &self.binary,
+            self.model.as_deref(),
+            "read-only",
+            workspace,
+            "understanding.schema.json",
+            &prompt,
+        )
+    }
+
+    pub fn contract(
+        &mut self,
+        request: &str,
+        workspace: &Path,
+        understanding: &Understanding,
+        previous: Option<&ContractBundle>,
+        rejection_feedback: Option<&str>,
+        validation_feedback: Option<&str>,
+    ) -> Result<ContractBundle, String> {
+        let role = include_str!("../../../prompts/analyst.contracting.md");
+        let prompt = format!(
+            "{role}\n\nContexto desta execução:\n- Locale: {}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nPedido original:\n{request}\n\nEntendimento aprovado pelo usuário:\n{}\n\nContrato anterior (se houver):\n{}\n\nFeedback de rejeição do usuário (se houver):\n{}\n\nErros de validação que devem ser corrigidos (se houver):\n{}\n\nRetorne apenas um contract_bundle JSON válido. Preserve ids e redação de critérios inalterados quando estiver refazendo o contrato.",
+            understanding.locale,
+            workspace.display(),
+            serde_json::to_string_pretty(understanding).map_err(|error| error.to_string())?,
+            serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
+            rejection_feedback.unwrap_or("Nenhum."),
+            validation_feedback.unwrap_or("Nenhum."),
+        );
+        invoke_codex(
+            &self.binary,
+            self.model.as_deref(),
+            "read-only",
+            workspace,
+            "contract_bundle.schema.json",
+            &prompt,
+        )
+    }
+}
 
 pub struct CodexCliExecutor {
     binary: OsString,

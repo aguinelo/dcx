@@ -1,0 +1,149 @@
+{
+  "$defs": {
+    "Answer": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "answered_by": {
+          "type": "string"
+        },
+        "question_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "answer",
+        "answered_by",
+        "question_id"
+      ],
+      "type": "object"
+    },
+    "Assumption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "type": "object"
+    },
+    "BlockingQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        },
+        "why_blocking": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "options",
+        "question",
+        "why_blocking"
+      ],
+      "type": "object"
+    },
+    "OpenQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "default_assumption": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "default_assumption",
+        "question"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "answers": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Answer"
+      },
+      "type": "array"
+    },
+    "assumptions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Assumption"
+      },
+      "type": "array"
+    },
+    "blocking_questions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BlockingQuestion"
+      },
+      "type": "array"
+    },
+    "context_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "locale": {
+      "type": "string"
+    },
+    "open_questions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OpenQuestion"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "answers",
+    "assumptions",
+    "blocking_questions",
+    "context_refs",
+    "goal",
+    "locale",
+    "open_questions",
+    "schema_version",
+    "summary"
+  ],
+  "title": "Understanding",
+  "type": "object"
+}

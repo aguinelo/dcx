@@ -1,0 +1,16 @@
+schema_version = 1
+
+[project]
+name = "cli-02-download-organizer"
+locale = "pt-BR"
+
+[stack]
+languages = ["python"]
+build = ["uv sync"]
+test = ["uv run pytest"]
+run = ["uv run python -m downloads_organizer"]
+
+[guides]
+files = []
+
+[tools]

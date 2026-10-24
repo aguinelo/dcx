@@ -1,5 +1,6 @@
 mod codex;
 mod demo;
+mod interactive;
 mod schemas;
 
 use harness_engine::RunState;
@@ -31,8 +32,19 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            Some("--request") => {
+                let request = args.collect::<Vec<_>>().join(" ");
+                if request.trim().is_empty() {
+                    eprintln!("Uso: harness run --request <pedido>");
+                    std::process::exit(2);
+                }
+                if let Err(error) = interactive::run(&request) {
+                    eprintln!("Falha na preparação da tarefa: {error}");
+                    std::process::exit(1);
+                }
+            }
             _ => {
-                eprintln!("Uso: harness run < --demo | --pilot >");
+                eprintln!("Uso: harness run < --demo | --pilot | --request <pedido> >");
                 std::process::exit(2);
             }
         },
@@ -41,7 +53,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|--version|run --demo|--pilot>"
+                "Uso: harness <states|schemas --write|--check [DIR]|--version|run --demo|--pilot|--request <pedido>>"
             );
             std::process::exit(2);
         }

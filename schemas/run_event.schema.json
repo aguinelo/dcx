@@ -20,11 +20,11 @@
     }
   },
   "required": [
-    "schema_version",
-    "run_id",
-    "sequence",
     "event_type",
-    "payload"
+    "payload",
+    "run_id",
+    "schema_version",
+    "sequence"
   ],
   "title": "RunEvent",
   "type": "object"

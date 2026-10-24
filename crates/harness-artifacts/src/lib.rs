@@ -6,6 +6,141 @@ use serde::{Deserialize, Serialize};
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Understanding {
+    pub schema_version: u32,
+    pub summary: String,
+    pub goal: String,
+    #[serde(default)]
+    pub assumptions: Vec<Assumption>,
+    #[serde(default)]
+    pub blocking_questions: Vec<BlockingQuestion>,
+    #[serde(default)]
+    pub open_questions: Vec<OpenQuestion>,
+    #[serde(default)]
+    pub answers: Vec<Answer>,
+    #[serde(default)]
+    pub context_refs: Vec<String>,
+    pub locale: String,
+}
+
+impl Understanding {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(ValidationError::new(
+                "unsupported understanding schema_version",
+            ));
+        }
+        if self.summary.trim().is_empty() || self.goal.trim().is_empty() {
+            return Err(ValidationError::new(
+                "understanding summary and goal must not be empty",
+            ));
+        }
+        if self.locale.trim().is_empty() {
+            return Err(ValidationError::new(
+                "understanding locale must not be empty",
+            ));
+        }
+        unique_non_empty(
+            self.assumptions.iter().map(|item| item.id.as_str()),
+            "assumption id",
+        )?;
+        unique_non_empty(
+            self.blocking_questions.iter().map(|item| item.id.as_str()),
+            "blocking question id",
+        )?;
+        unique_non_empty(
+            self.answers.iter().map(|item| item.question_id.as_str()),
+            "answered question id",
+        )?;
+        for question in &self.blocking_questions {
+            if question.question.trim().is_empty() || question.why_blocking.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "blocking question {} needs question and why_blocking text",
+                    question.id
+                )));
+            }
+            if question
+                .options
+                .iter()
+                .any(|option| option.trim().is_empty())
+            {
+                return Err(ValidationError::new(format!(
+                    "blocking question {} has an empty option",
+                    question.id
+                )));
+            }
+        }
+        for answer in &self.answers {
+            if answer.answer.trim().is_empty() || answer.answered_by.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "answer for {} needs answer and answered_by text",
+                    answer.question_id
+                )));
+            }
+            if !self
+                .blocking_questions
+                .iter()
+                .any(|question| question.id == answer.question_id)
+            {
+                return Err(ValidationError::new(format!(
+                    "answer references unknown blocking question {}",
+                    answer.question_id
+                )));
+            }
+        }
+        for question in &self.open_questions {
+            if question.question.trim().is_empty() || question.default_assumption.trim().is_empty()
+            {
+                return Err(ValidationError::new(
+                    "open question needs question and default_assumption text",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn unanswered_blocking_questions(&self) -> Vec<&BlockingQuestion> {
+        self.blocking_questions
+            .iter()
+            .filter(|question| {
+                !self
+                    .answers
+                    .iter()
+                    .any(|answer| answer.question_id == question.id)
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Assumption {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct BlockingQuestion {
+    pub id: String,
+    pub question: String,
+    pub why_blocking: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct OpenQuestion {
+    pub question: String,
+    pub default_assumption: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Answer {
+    pub question_id: String,
+    pub answer: String,
+    pub answered_by: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Criterion {
     pub id: String,
     pub description: String,
@@ -43,6 +178,59 @@ impl Contract {
             self.criteria.iter().map(|criterion| criterion.id.as_str()),
             "criterion id",
         )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct ContractBundle {
+    pub schema_version: u32,
+    pub contract: Contract,
+    pub sensor_suite: SensorSuite,
+}
+
+impl ContractBundle {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(ValidationError::new(
+                "unsupported contract_bundle schema_version",
+            ));
+        }
+        self.contract.validate()?;
+        self.sensor_suite.validate_for(&self.contract)
+    }
+
+    pub fn validate_revision_from(&self, previous: &Self) -> Result<(), ValidationError> {
+        for old in &previous.contract.criteria {
+            if let Some(reused) = self
+                .contract
+                .criteria
+                .iter()
+                .find(|criterion| criterion.id == old.id)
+            {
+                if reused != old {
+                    return Err(ValidationError::new(format!(
+                        "criterion id {} was reused for changed wording; use a new id",
+                        old.id
+                    )));
+                }
+            }
+        }
+        for old in &previous.sensor_suite.sensors {
+            if let Some(reused) = self
+                .sensor_suite
+                .sensors
+                .iter()
+                .find(|sensor| sensor.id == old.id)
+            {
+                if reused != old {
+                    return Err(ValidationError::new(format!(
+                        "sensor id {} was reused for a changed sensor; use a new id",
+                        old.id
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -306,6 +494,14 @@ fn unique_non_empty<'a>(
 /// Generate the checked-in JSON Schemas from the Rust artifact definitions.
 pub fn json_schemas() -> Result<Vec<(&'static str, String)>, serde_json::Error> {
     Ok(vec![
+        (
+            "understanding.schema.json",
+            serialize_schema::<Understanding>()?,
+        ),
+        (
+            "contract_bundle.schema.json",
+            serialize_schema::<ContractBundle>()?,
+        ),
         ("contract.schema.json", serialize_schema::<Contract>()?),
         (
             "sensor_suite.schema.json",
@@ -338,6 +534,21 @@ fn normalize_strict_schema(value: &mut serde_json::Value) {
                     "additionalProperties".to_owned(),
                     serde_json::Value::Bool(false),
                 );
+                let required = object
+                    .get("properties")
+                    .and_then(|value| value.as_object())
+                    .map(|properties| {
+                        serde_json::Value::Array(
+                            properties
+                                .keys()
+                                .cloned()
+                                .map(serde_json::Value::String)
+                                .collect(),
+                        )
+                    });
+                if let Some(required) = required {
+                    object.insert("required".to_owned(), required);
+                }
             }
             for child in object.values_mut() {
                 normalize_strict_schema(child);
@@ -418,9 +629,61 @@ mod tests {
     }
 
     #[test]
+    fn contract_bundle_validates_contract_and_sensor_coverage_together() {
+        let bundle = ContractBundle {
+            schema_version: SCHEMA_VERSION,
+            contract: contract(),
+            sensor_suite: SensorSuite {
+                schema_version: SCHEMA_VERSION,
+                sensors: vec![
+                    sensor(SensorVisibility::Visible),
+                    SensorSpec {
+                        id: "hidden-records-sensor".into(),
+                        visibility: SensorVisibility::Hidden,
+                        ..sensor(SensorVisibility::Visible)
+                    },
+                ],
+            },
+        };
+        assert!(bundle.validate().is_ok());
+
+        let reuses_criterion_id = ContractBundle {
+            contract: Contract {
+                criteria: vec![Criterion {
+                    id: "records".into(),
+                    description: "A linha vira outro resultado".into(),
+                }],
+                ..bundle.contract.clone()
+            },
+            ..bundle.clone()
+        };
+        assert!(reuses_criterion_id.validate().is_ok());
+        assert!(reuses_criterion_id.validate_revision_from(&bundle).is_err());
+
+        let invalid = ContractBundle {
+            sensor_suite: SensorSuite {
+                schema_version: SCHEMA_VERSION,
+                sensors: vec![sensor(SensorVisibility::Visible)],
+            },
+            ..bundle
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
     fn schemas_are_generated_for_all_mvp_artifacts() {
         let schemas = json_schemas().expect("schemas serializáveis");
-        assert_eq!(schemas.len(), 8);
+        assert_eq!(schemas.len(), 10);
+        assert!(
+            schemas
+                .iter()
+                .any(|(name, _)| *name == "understanding.schema.json")
+        );
+        assert!(
+            schemas
+                .iter()
+                .any(|(name, _)| *name == "contract_bundle.schema.json")
+        );
         assert!(
             schemas
                 .iter()
@@ -434,6 +697,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn understanding_requires_answers_before_contracting() {
+        let understanding = Understanding {
+            schema_version: SCHEMA_VERSION,
+            summary: "Organizar arquivos da pasta de downloads".into(),
+            goal: "Arquivos classificados em pastas".into(),
+            assumptions: vec![],
+            blocking_questions: vec![BlockingQuestion {
+                id: "operation".into(),
+                question: "Mover ou copiar?".into(),
+                why_blocking: "Muda os efeitos da tarefa".into(),
+                options: vec!["mover".into(), "copiar".into()],
+            }],
+            open_questions: vec![],
+            answers: vec![],
+            context_refs: vec![],
+            locale: "pt-BR".into(),
+        };
+        assert!(understanding.validate().is_ok());
+        assert_eq!(understanding.unanswered_blocking_questions().len(), 1);
+
+        let answered = Understanding {
+            answers: vec![Answer {
+                question_id: "operation".into(),
+                answer: "mover".into(),
+                answered_by: "user".into(),
+            }],
+            ..understanding
+        };
+        assert!(answered.validate().is_ok());
+        assert!(answered.unanswered_blocking_questions().is_empty());
+    }
+
     fn assert_closed_objects(value: &serde_json::Value) {
         match value {
             serde_json::Value::Object(object) => {
@@ -442,6 +738,20 @@ mod tests {
                         object.get("additionalProperties"),
                         Some(&serde_json::Value::Bool(false))
                     );
+                    if let Some(properties) = object.get("properties").and_then(|x| x.as_object()) {
+                        let required = object
+                            .get("required")
+                            .and_then(|x| x.as_array())
+                            .expect("strict objects declare required fields")
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .collect::<std::collections::BTreeSet<_>>();
+                        let property_names = properties
+                            .keys()
+                            .map(String::as_str)
+                            .collect::<std::collections::BTreeSet<_>>();
+                        assert_eq!(required, property_names);
+                    }
                 }
                 for child in object.values() {
                     assert_closed_objects(child);

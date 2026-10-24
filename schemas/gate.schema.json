@@ -29,13 +29,13 @@
     }
   },
   "required": [
-    "schema_version",
-    "id",
-    "gate_type",
-    "question",
     "context_summary",
+    "free_text_allowed",
+    "gate_type",
+    "id",
     "options",
-    "free_text_allowed"
+    "question",
+    "schema_version"
   ],
   "title": "Gate",
   "type": "object"

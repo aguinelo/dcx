@@ -490,8 +490,13 @@ impl RunState {
         matches!(
             (self, next),
             (New, Understanding)
+                | (Understanding, AwaitingHuman)
+                | (AwaitingHuman, Understanding)
+                | (AwaitingHuman, Contracting)
                 | (Understanding, Contracting)
                 | (Contracting, AcceptanceAuthoring)
+                | (Contracting, AwaitingHuman)
+                | (AwaitingHuman, AcceptanceAuthoring)
                 | (AcceptanceAuthoring, Planning)
                 | (Planning, Executing)
                 | (Planning, Failed)
@@ -758,6 +763,15 @@ mod tests {
     #[test]
     fn verification_rejection_returns_to_execution() {
         assert!(RunState::Verifying.can_transition_to(RunState::Executing));
+    }
+
+    #[test]
+    fn human_gates_return_to_their_owning_phase() {
+        assert!(RunState::Understanding.can_transition_to(RunState::AwaitingHuman));
+        assert!(RunState::AwaitingHuman.can_transition_to(RunState::Understanding));
+        assert!(RunState::Contracting.can_transition_to(RunState::AwaitingHuman));
+        assert!(RunState::AwaitingHuman.can_transition_to(RunState::Contracting));
+        assert!(RunState::AwaitingHuman.can_transition_to(RunState::AcceptanceAuthoring));
     }
 
     #[test]

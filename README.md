@@ -36,3 +36,11 @@ cargo run -p harness-cli -- schemas --write
 The pilot currently targets the local Codex CLI adapter. Other providers remain future adapters behind the engine role interfaces.
 
 The engine derives `step_report.files_changed` from workspace snapshots around each executor attempt, instead of trusting the executor's own list. Snapshots skip symlinks and enforce 16 MiB per file and 64 MiB per workspace limits.
+
+Start an interactive understanding and contract approval flow for the current project:
+
+```sh
+cargo run -p harness-cli -- run --request "Uma ferramenta de linha de comando pra organizar minha pasta de downloads."
+```
+
+The analyst inspects the current directory read-only, asks blocking questions in the terminal, prepares a contract, and revises it after a rejection. On approval, the command saves the understanding, contract, and sensor suite under `.harness/runs/`. M1 stops at approval; task execution for arbitrary requests is not wired yet.

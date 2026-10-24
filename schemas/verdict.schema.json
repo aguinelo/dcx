@@ -18,8 +18,8 @@
       },
       "required": [
         "criterion_id",
-        "passed",
-        "evidence"
+        "evidence",
+        "passed"
       ],
       "type": "object"
     },
@@ -81,11 +81,11 @@
     }
   },
   "required": [
-    "schema_version",
     "approved",
     "criteria",
     "issues",
-    "notes"
+    "notes",
+    "schema_version"
   ],
   "title": "Verdict",
   "type": "object"

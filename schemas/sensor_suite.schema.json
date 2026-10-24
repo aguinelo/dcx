@@ -33,13 +33,13 @@
         }
       },
       "required": [
-        "id",
+        "check",
         "criterion_id",
-        "type",
+        "id",
         "kind",
-        "visibility",
         "purpose",
-        "check"
+        "type",
+        "visibility"
       ],
       "type": "object"
     },

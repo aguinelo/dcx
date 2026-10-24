@@ -11,8 +11,8 @@
         }
       },
       "required": [
-        "id",
-        "description"
+        "description",
+        "id"
       ],
       "type": "object"
     }
@@ -59,9 +59,13 @@
     }
   },
   "required": [
-    "schema_version",
+    "assumptions",
+    "constraints",
+    "criteria",
+    "interface",
     "objective",
-    "criteria"
+    "out_of_scope",
+    "schema_version"
   ],
   "title": "Contract",
   "type": "object"

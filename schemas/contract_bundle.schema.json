@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "Contract": {
+      "additionalProperties": false,
+      "properties": {
+        "assumptions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "constraints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "criteria": {
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          },
+          "type": "array"
+        },
+        "interface": {
+          "default": null
+        },
+        "objective": {
+          "type": "string"
+        },
+        "out_of_scope": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "assumptions",
+        "constraints",
+        "criteria",
+        "interface",
+        "objective",
+        "out_of_scope",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "Criterion": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "id"
+      ],
+      "type": "object"
+    },
+    "SensorKind": {
+      "enum": [
+        "computational",
+        "inferential"
+      ],
+      "type": "string"
+    },
+    "SensorSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "criterion_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SensorKind"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/SensorType"
+        },
+        "visibility": {
+          "$ref": "#/$defs/SensorVisibility"
+        }
+      },
+      "required": [
+        "check",
+        "criterion_id",
+        "id",
+        "kind",
+        "purpose",
+        "type",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SensorSuite": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sensors": {
+          "items": {
+            "$ref": "#/$defs/SensorSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "sensors"
+      ],
+      "type": "object"
+    },
+    "SensorType": {
+      "enum": [
+        "test",
+        "command",
+        "query",
+        "judge"
+      ],
+      "type": "string"
+    },
+    "SensorVisibility": {
+      "enum": [
+        "visible",
+        "hidden"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "$ref": "#/$defs/Contract"
+    },
+    "schema_version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sensor_suite": {
+      "$ref": "#/$defs/SensorSuite"
+    }
+  },
+  "required": [
+    "contract",
+    "schema_version",
+    "sensor_suite"
+  ],
+  "title": "ContractBundle",
+  "type": "object"
+}

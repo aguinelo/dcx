@@ -37,13 +37,13 @@
     }
   },
   "required": [
+    "attempts",
+    "decisions",
+    "disputes",
+    "files_changed",
     "schema_version",
     "step_id",
-    "attempts",
-    "summary",
-    "files_changed",
-    "decisions",
-    "disputes"
+    "summary"
   ],
   "title": "StepReport",
   "type": "object"

@@ -39,12 +39,13 @@
         }
       },
       "required": [
-        "id",
-        "title",
-        "description",
         "criteria",
+        "depends_on",
+        "description",
+        "files_hint",
+        "id",
         "sensors",
-        "depends_on"
+        "title"
       ],
       "type": "object"
     }
@@ -75,11 +76,11 @@
     }
   },
   "required": [
-    "schema_version",
     "contract_version",
-    "steps",
     "integration_step_id",
-    "rationale"
+    "rationale",
+    "schema_version",
+    "steps"
   ],
   "title": "Plan",
   "type": "object"
