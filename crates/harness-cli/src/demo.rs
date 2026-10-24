@@ -5,10 +5,11 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_artifacts::{
-    Contract, DeliveryReport, SCHEMA_VERSION, SensorResult, SensorSpec, SensorSuite,
-    SensorVisibility,
+    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION, SensorResult,
+    SensorSpec, SensorSuite, StepReport, Verdict, VerdictIssue,
 };
-use harness_engine::{RunLifecycle, RunState};
+use harness_engine::{ExecutionContext, Executor, RunCoordinator, SensorRunner, Verifier};
+use harness_engine::{RunParticipants, RunRequest};
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -38,81 +39,51 @@ pub fn run() -> DemoResult<()> {
 
 fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
     let contract = demo_contract()?;
-    contract.validate()?;
     let sensors = demo_sensors()?;
-    sensors.validate_for(&contract)?;
-    let mut lifecycle = RunLifecycle::new();
-
-    lifecycle.transition(RunState::Understanding)?;
-    lifecycle.transition(RunState::Contracting)?;
-    lifecycle.transition(RunState::AcceptanceAuthoring)?;
-    lifecycle.transition(RunState::Planning)?;
-    lifecycle.transition(RunState::Executing)?;
-
-    let worker_dir = workspace.join("worker");
-    fs::create_dir_all(&worker_dir)?;
-    let converter_path = worker_dir.join("convert.py");
-    fs::write(&converter_path, CONVERTER)?;
-    println!("Worker de demonstração escreveu convert.py no diretório temporário.");
-
-    let visible = sensors
-        .sensors
-        .iter()
-        .filter(|sensor| sensor.visibility == SensorVisibility::Visible)
-        .collect::<Vec<_>>();
-    let visible_results = run_visible_sensors(&visible, &converter_path, workspace)?;
-    if visible_results.iter().any(|result| !result.passed) {
-        lifecycle.transition(RunState::Failed)?;
-        return Err("sensor visível reprovou".into());
+    let mut executor = DemoExecutor;
+    let mut sensor_runner = DemoSensorRunner {
+        converter_path: workspace.join("worker/convert.py"),
+    };
+    let mut verifier = DemoVerifier;
+    let execution = RunCoordinator::new(3)
+        .map_err(std::io::Error::other)?
+        .execute(
+            RunRequest {
+                contract: &contract,
+                suite: &sensors,
+                step_id: "cli-01-converter",
+                workspace,
+            },
+            RunParticipants {
+                executor: &mut executor,
+                sensor_runner: &mut sensor_runner,
+                verifier: &mut verifier,
+            },
+        )
+        .map_err(std::io::Error::other)?;
+    for step_report in &execution.step_reports {
+        println!("{}", step_report.summary);
     }
-
-    lifecycle.transition(RunState::Verifying)?;
-    let hidden = sensors
-        .sensors
-        .iter()
-        .filter(|sensor| sensor.visibility == SensorVisibility::Hidden)
-        .collect::<Vec<_>>();
-    let mut sensor_results = visible_results;
-    sensor_results.extend(run_hidden_sensors(&hidden, &converter_path, workspace)?);
-    let criteria_passed = contract
+    let criteria_passed = execution
+        .verdict
         .criteria
         .iter()
-        .filter(|criterion| {
-            let linked = sensors
-                .sensors
-                .iter()
-                .filter(|sensor| sensor.criterion_id == criterion.id)
-                .collect::<Vec<_>>();
-            !linked.is_empty()
-                && linked.iter().all(|sensor| {
-                    sensor_results
-                        .iter()
-                        .any(|result| result.sensor_id == sensor.id && result.passed)
-                })
-        })
+        .filter(|result| result.passed)
         .count();
-
-    if criteria_passed == contract.criteria.len() {
-        lifecycle.transition(RunState::AwaitingMerge)?;
-        lifecycle.transition(RunState::Done)?;
-    } else {
-        lifecycle.transition(RunState::Executing)?;
-        lifecycle.transition(RunState::Failed)?;
-    }
 
     let report = DeliveryReport {
         schema_version: SCHEMA_VERSION,
         run_id: format!("demo-{}", std::process::id()),
-        summary: if criteria_passed == contract.criteria.len() {
+        summary: if execution.verdict.approved {
             "Conversor CSV para JSON passou nos sensores visível e oculto.".to_owned()
         } else {
             "A execução de demonstração não passou em todos os critérios.".to_owned()
         },
         criteria_passed,
         criteria_total: contract.criteria.len(),
-        sensor_results,
-        states: lifecycle
-            .history()
+        sensor_results: execution.sensor_results,
+        states: execution
+            .states
             .iter()
             .map(|state| state.as_str().to_owned())
             .collect(),
@@ -136,77 +107,148 @@ fn demo_sensors() -> DemoResult<SensorSuite> {
     ))?)
 }
 
-fn run_visible_sensors(
-    sensors: &[&SensorSpec],
-    converter: &Path,
-    workspace: &Path,
-) -> DemoResult<Vec<SensorResult>> {
-    sensors
-        .iter()
-        .map(|sensor| {
-            let (filename, csv, expected, evidence) = match sensor.id.as_str() {
-                "visible-record-conversion" => (
-                    "visible.csv",
-                    "name,city\nAda,Lisbon\n",
-                    serde_json::json!([{"name":"Ada", "city":"Lisbon"}]),
-                    "CSV simples convertido para um array JSON de objetos.",
-                ),
-                "visible-quoted-fields" => (
-                    "visible-quoted.csv",
-                    "name,city,quote\nAda,\"London, UK\",\"She said \"\"hello\"\"\"\n",
-                    serde_json::json!([{"name":"Ada", "city":"London, UK", "quote":"She said \"hello\""}]),
-                    "Vírgula e aspas escapadas preservadas em campos CSV.",
-                ),
-                other => return Err(format!("sensor visível desconhecido: {other}").into()),
-            };
-            let input = workspace.join(filename);
-            fs::write(&input, csv)?;
-            let output = run_converter(converter, &input)?;
-            let parsed: serde_json::Value = serde_json::from_slice(&output)?;
-            let passed = parsed == expected;
-            Ok(SensorResult {
-                sensor_id: sensor.id.clone(),
-                passed,
-                evidence: if passed {
-                    evidence.to_owned()
-                } else {
-                    "A saída não corresponde ao resultado esperado.".to_owned()
-                },
-            })
+struct DemoExecutor;
+
+impl Executor for DemoExecutor {
+    fn execute(
+        &mut self,
+        context: &ExecutionContext,
+        workspace: &Path,
+    ) -> Result<StepReport, String> {
+        if context.visible_sensors.is_empty() {
+            return Err("executor recebeu contexto sem sensores visíveis".to_owned());
+        }
+        let worker_dir = workspace.join("worker");
+        fs::create_dir_all(&worker_dir).map_err(|error| error.to_string())?;
+        let converter_path = worker_dir.join("convert.py");
+        fs::write(&converter_path, CONVERTER).map_err(|error| error.to_string())?;
+        Ok(StepReport {
+            schema_version: SCHEMA_VERSION,
+            step_id: "cli-01-converter".to_owned(),
+            attempts: 1,
+            summary: "Worker de demonstração escreveu convert.py no diretório temporário."
+                .to_owned(),
+            files_changed: vec!["worker/convert.py".to_owned()],
+            decisions: vec![],
+            disputes: vec![],
         })
-        .collect()
+    }
 }
 
-fn run_hidden_sensors(
-    sensors: &[&SensorSpec],
-    converter: &Path,
-    workspace: &Path,
-) -> DemoResult<Vec<SensorResult>> {
-    let input = workspace.join("hidden.csv");
-    fs::write(
-        &input,
-        "name,quote,note\nAda,\"She said \"\"hello\"\"\",\"line one\nline two\"\n",
-    )?;
-    let output = run_converter(converter, &input)?;
-    let parsed: serde_json::Value = serde_json::from_slice(&output)?;
-    let passed = parsed
-        == serde_json::json!([{
-            "name":"Ada",
-            "quote":"She said \"hello\"",
-            "note":"line one\nline two"
-        }]);
-    Ok(sensors
-        .iter()
-        .map(|sensor| SensorResult {
+struct DemoSensorRunner {
+    converter_path: PathBuf,
+}
+
+impl SensorRunner for DemoSensorRunner {
+    fn run_sensor(
+        &mut self,
+        sensor: &SensorSpec,
+        workspace: &Path,
+    ) -> Result<SensorResult, String> {
+        let (filename, csv, expected, evidence) = match sensor.id.as_str() {
+            "visible-record-conversion" => (
+                "visible.csv",
+                "name,city\nAda,Lisbon\n",
+                serde_json::json!([{"name":"Ada", "city":"Lisbon"}]),
+                "CSV simples convertido para um array JSON de objetos.",
+            ),
+            "visible-quoted-fields" => (
+                "visible-quoted.csv",
+                "name,city,quote\nAda,\"London, UK\",\"She said \"\"hello\"\"\"\n",
+                serde_json::json!([{"name":"Ada", "city":"London, UK", "quote":"She said \"hello\""}]),
+                "Vírgula e aspas escapadas preservadas em campos CSV.",
+            ),
+            "hidden-quoted-fields" => (
+                "hidden.csv",
+                "name,quote,note\nAda,\"She said \"\"hello\"\"\",\"line one\nline two\"\n",
+                serde_json::json!([{"name":"Ada", "quote":"She said \"hello\"", "note":"line one\nline two"}]),
+                "Campos com aspas, vírgula ou quebra de linha preservados.",
+            ),
+            other => return Err(format!("sensor desconhecido: {other}")),
+        };
+        let input = workspace.join(filename);
+        fs::write(&input, csv).map_err(|error| error.to_string())?;
+        let output =
+            run_converter(&self.converter_path, &input).map_err(|error| error.to_string())?;
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        let passed = parsed == expected;
+        Ok(SensorResult {
             sensor_id: sensor.id.clone(),
+            criterion_id: sensor.criterion_id.clone(),
             passed,
             evidence: if passed {
-                "Campos com aspas, vírgula ou quebra de linha preservados.".to_owned()
+                evidence.to_owned()
             } else {
-                "O caso CSV com campos citados não foi preservado.".to_owned()
+                "A saída não corresponde ao resultado esperado.".to_owned()
             },
         })
-        .collect())
+    }
+}
+
+struct DemoVerifier;
+
+impl Verifier for DemoVerifier {
+    fn verify(
+        &mut self,
+        contract: &Contract,
+        suite: &SensorSuite,
+        _step_report: &StepReport,
+        sensor_results: &[SensorResult],
+    ) -> Result<Verdict, String> {
+        let criteria = contract
+            .criteria
+            .iter()
+            .map(|criterion| {
+                let expected = suite
+                    .sensors
+                    .iter()
+                    .filter(|sensor| sensor.criterion_id == criterion.id)
+                    .collect::<Vec<_>>();
+                let evidence = sensor_results
+                    .iter()
+                    .filter(|result| result.criterion_id == criterion.id)
+                    .map(|result| format!("{}: {}", result.sensor_id, result.evidence))
+                    .collect::<Vec<_>>();
+                let passed = !expected.is_empty()
+                    && expected.iter().all(|sensor| {
+                        sensor_results.iter().any(|result| {
+                            result.sensor_id == sensor.id
+                                && result.criterion_id == criterion.id
+                                && result.passed
+                        })
+                    });
+                CriterionVerdict {
+                    criterion_id: criterion.id.clone(),
+                    passed,
+                    evidence,
+                }
+            })
+            .collect::<Vec<_>>();
+        let approved = criteria.iter().all(|criterion| criterion.passed);
+        let issues = if approved {
+            vec![]
+        } else {
+            criteria
+                .iter()
+                .filter(|criterion| !criterion.passed)
+                .map(|criterion| VerdictIssue {
+                    criterion_id: criterion.criterion_id.clone(),
+                    description:
+                        "Um ou mais sensores de aceite falharam ou não produziram resultado."
+                            .to_owned(),
+                    severity: IssueSeverity::Blocker,
+                })
+                .collect()
+        };
+        Ok(Verdict {
+            schema_version: SCHEMA_VERSION,
+            approved,
+            criteria,
+            issues,
+            notes: vec!["Verificação determinística do protótipo; ainda não usa um agente LLM independente.".to_owned()],
+        })
+    }
 }
 
 fn run_converter(converter: &Path, input: &Path) -> DemoResult<Vec<u8>> {
