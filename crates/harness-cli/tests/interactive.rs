@@ -80,11 +80,63 @@ fn unique_dir(name: &str) -> PathBuf {
     path
 }
 
-fn write_fake_codex(dir: &Path, body: &str) -> PathBuf {
+fn write_fake_codex(dir: &Path, contracts: &[&str]) -> PathBuf {
     let path = dir.join("fake-codex");
-    let script = format!(
-        "#!/bin/sh\nschema=\"\"\nprevious=\"\"\nfor arg in \"$@\"; do\n  if [ \"$previous\" = \"--output-schema\" ]; then schema=\"$arg\"; fi\n  previous=\"$arg\"\ndone\n{body}\n"
-    );
+    let counter = dir.join("contract-calls");
+    let contracts = contracts
+        .iter()
+        .map(|contract| format!("{contract:?}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let script = r#"#!/usr/bin/env python3
+import json
+import sys
+
+UNDERSTANDING = __UNDERSTANDING__
+CONTRACTS = [
+__CONTRACTS__
+]
+COUNTER = __COUNTER__
+
+schema = ""
+args = sys.argv[1:]
+for index, arg in enumerate(args):
+    if arg == "--output-schema" and index + 1 < len(args):
+        schema = args[index + 1]
+prompt = sys.stdin.read()
+
+if schema.endswith("understanding.schema.json"):
+    print(UNDERSTANDING)
+elif schema.endswith("contract_bundle.schema.json"):
+    count = 0
+    try:
+        with open(COUNTER, encoding="utf-8") as handle:
+            count = int(handle.read())
+    except FileNotFoundError:
+        pass
+    count += 1
+    with open(COUNTER, "w", encoding="utf-8") as handle:
+        handle.write(str(count))
+    print(CONTRACTS[min(count, len(CONTRACTS)) - 1])
+elif schema.endswith("sensor_implementation.schema.json"):
+    marker = "Contrato aprovado e suíte de sensores:\n"
+    start = prompt.index(marker) + len(marker)
+    end = prompt.index("\n\nImplementação anterior", start)
+    bundle = json.loads(prompt[start:end])
+    scripts = []
+    for sensor in bundle["sensor_suite"]["sensors"]:
+        scripts.append({
+            "sensor_id": sensor["id"],
+            "filename": sensor["id"].replace("-", "_") + ".py",
+            "source": "import sys\nprint('not implemented')\nsys.exit(1)\n",
+        })
+    print(json.dumps({"schema_version": 1, "scripts": scripts}))
+else:
+    sys.exit(3)
+"#
+    .replace("__UNDERSTANDING__", &format!("{UNDERSTANDING:?}"))
+    .replace("__CONTRACTS__", &contracts)
+    .replace("__COUNTER__", &format!("{counter:?}"));
     fs::write(&path, script).expect("escrever Codex falso");
     let mut permissions = fs::metadata(&path).expect("metadados").permissions();
     permissions.set_mode(0o755);
@@ -92,7 +144,7 @@ fn write_fake_codex(dir: &Path, body: &str) -> PathBuf {
     path
 }
 
-fn run_request(project: &Path, codex: &Path, input: &str) -> std::process::Output {
+fn run_request(project: &Path, state: &Path, codex: &Path, input: &str) -> std::process::Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_harness"))
         .args([
             "run",
@@ -101,6 +153,7 @@ fn run_request(project: &Path, codex: &Path, input: &str) -> std::process::Outpu
         ])
         .current_dir(project)
         .env("HARNESS_CODEX_BIN", codex)
+        .env("HARNESS_STATE_DIR", state)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -127,14 +180,10 @@ fn single_run_dir(project: &Path) -> PathBuf {
 #[test]
 fn blocking_question_is_answered_before_contract_approval() {
     let project = unique_dir("approve");
-    let codex = write_fake_codex(
-        &project,
-        &format!(
-            "case \"$schema\" in\n  *understanding.schema.json) cat <<'JSON'\n{UNDERSTANDING}\nJSON\n    ;;\n  *contract_bundle.schema.json) cat <<'JSON'\n{CONTRACT}\nJSON\n    ;;\n  *) exit 3 ;;\nesac"
-        ),
-    );
+    let state_dir = unique_dir("approve-state");
+    let codex = write_fake_codex(&project, &[CONTRACT]);
 
-    let output = run_request(&project, &codex, "tipo\ns\n");
+    let output = run_request(&project, &state_dir, &codex, "tipo\ns\n");
 
     assert!(
         output.status.success(),
@@ -145,6 +194,7 @@ fn blocking_question_is_answered_before_contract_approval() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Pergunta bloqueante: Organizar por tipo ou por data?"));
     assert!(stdout.contains("Contrato aprovado"));
+    assert!(stdout.contains("Sensores de aceite implementados"));
     assert!(stdout.contains("acceptance_authoring"));
 
     let run = single_run_dir(&project);
@@ -164,12 +214,27 @@ fn blocking_question_is_answered_before_contract_approval() {
         serde_json::from_slice(&fs::read(run.join("run.json")).expect("run")).expect("JSON válido");
     let states = state["states"].as_array().expect("estados");
     assert!(states.iter().any(|state| state == "awaiting_human"));
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("sensor_manifest.json")).expect("manifesto"))
+            .expect("manifesto JSON");
+    assert_eq!(manifest["scripts"].as_array().expect("scripts").len(), 2);
+    assert!(!manifest.to_string().contains("not implemented"));
+
+    let run_id = run
+        .file_name()
+        .expect("run id")
+        .to_string_lossy()
+        .to_string();
+    let sensors = state_dir.join("runs").join(&run_id).join("sensors");
+    assert!(sensors.join("visible_organize_by_type.py").is_file());
+    assert!(sensors.join("hidden_organize_by_type.py").is_file());
 }
 
 #[test]
 fn rejected_contract_keeps_previous_wording_and_revises() {
     let project = unique_dir("reject");
-    let counter = project.join("contract-calls");
+    let state_dir = unique_dir("reject-state");
     let changed = CONTRACT.replace(
         "\"description\": \"Cada arquivo vai para uma pasta com o nome do seu tipo.\"",
         "\"description\": \"Cada arquivo vai para uma pasta por tipo, com nomes normalizados.\"",
@@ -180,15 +245,11 @@ fn rejected_contract_keeps_previous_wording_and_revises() {
             "\"objective\": \"Organizar a pasta de downloads por tipo.\"",
             "\"objective\": \"Organizar a pasta de downloads por tipo, com nomes normalizados.\"",
         );
-    let codex = write_fake_codex(
-        &project,
-        &format!(
-            "case \"$schema\" in\n  *understanding.schema.json) cat <<'JSON'\n{UNDERSTANDING}\nJSON\n    ;;\n  *contract_bundle.schema.json)\n    count=0\n    [ -f {counter:?} ] && count=$(cat {counter:?})\n    count=$((count + 1))\n    echo \"$count\" > {counter:?}\n    case \"$count\" in\n      1) cat <<'JSON'\n{CONTRACT}\nJSON\n        ;;\n      2) cat <<'JSON'\n{changed}\nJSON\n        ;;\n      *) cat <<'JSON'\n{new_id}\nJSON\n        ;;\n    esac\n    ;;\n  *) exit 3 ;;\nesac"
-        ),
-    );
+    let codex = write_fake_codex(&project, &[CONTRACT, &changed, &new_id]);
 
     let output = run_request(
         &project,
+        &state_dir,
         &codex,
         "tipo\nr\nPrefiro nomes normalizados.\ns\n",
     );
@@ -226,4 +287,15 @@ fn rejected_contract_keeps_previous_wording_and_revises() {
     );
     assert!(run.join("contract_revisions/contract-v2.json").is_file());
     assert!(!run.join("contract_revisions/contract-v3.json").is_file());
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("sensor_manifest.json")).expect("manifesto"))
+            .expect("manifesto JSON");
+    let scripts = manifest["scripts"].as_array().expect("scripts");
+    assert_eq!(scripts.len(), 2);
+    assert!(
+        scripts
+            .iter()
+            .any(|script| script["sensor_id"] == "visible-organize-by-type-v2")
+    );
 }

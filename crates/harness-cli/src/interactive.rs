@@ -4,9 +4,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::codex::CodexCliAnalyst;
-use harness_artifacts::{Answer, ContractBundle, SCHEMA_VERSION, SensorVisibility, Understanding};
-use harness_engine::{RunLifecycle, RunState};
+use crate::codex::{CodexCliAcceptanceAuthor, CodexCliAnalyst};
+use harness_artifacts::{
+    Answer, ContractBundle, SCHEMA_VERSION, SensorImplementation, SensorLock, SensorVisibility,
+    Understanding,
+};
+use harness_engine::{RunLifecycle, RunState, check_sensors_fail};
+use harness_sensors::ScriptSensorRunner;
 
 type InteractiveResult<T> = Result<T, Box<dyn Error>>;
 
@@ -33,8 +37,10 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         &mut lifecycle,
     )?;
     lifecycle.transition(RunState::AcceptanceAuthoring)?;
+    let run_id = new_run_id();
     let artifact_dir = save_artifacts(
         &workspace,
+        &run_id,
         &understanding,
         &approved_bundle,
         &revisions,
@@ -44,9 +50,139 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         "\nContrato aprovado. Artefatos salvos em {}",
         artifact_dir.display()
     );
-    println!("Próximo estado: {}", lifecycle.current());
-    println!("A autoria de sensores e a execução da tarefa pertencem aos próximos marcos.");
+
+    let (implementation, sensor_dir) =
+        author_sensors(&workspace, &approved_bundle, &understanding.locale, &run_id)?;
+    save_sensor_manifest(
+        &artifact_dir,
+        &run_id,
+        &approved_bundle,
+        &implementation,
+        &sensor_dir,
+    )?;
+    println!("\nSensores de aceite implementados, travados e verificados contra o baseline.");
+    println!(
+        "Manifesto: {}",
+        artifact_dir.join("sensor_manifest.json").display()
+    );
+    println!(
+        "Fontes dos sensores (fora do workspace): {}",
+        sensor_dir.display()
+    );
+    println!("Estado: {}", lifecycle.current());
+    println!("O plano e a execução da tarefa pertencem ao próximo marco.");
     Ok(())
+}
+
+fn author_sensors(
+    workspace: &Path,
+    bundle: &ContractBundle,
+    locale: &str,
+    run_id: &str,
+) -> InteractiveResult<(SensorImplementation, PathBuf)> {
+    let mut author = CodexCliAcceptanceAuthor::default();
+    let mut previous: Option<SensorImplementation> = None;
+    let mut feedback: Option<String> = None;
+    let directory = sensor_directory(run_id);
+    for attempt in 1..=3 {
+        let implementation = author
+            .implement(
+                workspace,
+                bundle,
+                locale,
+                previous.as_ref(),
+                feedback.as_deref(),
+            )
+            .map_err(|error| {
+                format!("Acceptance author não conseguiu implementar sensores: {error}")
+            })?;
+        if let Err(error) = implementation.validate_for(&bundle.sensor_suite) {
+            println!("Sensores fora das regras ({error}); solicitando correção.");
+            feedback = Some(format!("Implementação inválida: {error}"));
+            previous = Some(implementation);
+            continue;
+        }
+        let _ = fs::remove_dir_all(&directory);
+        let mut runner =
+            ScriptSensorRunner::materialize(&implementation, &bundle.sensor_suite, &directory)
+                .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?;
+        match check_sensors_fail(&bundle.sensor_suite, &mut runner, workspace) {
+            Ok(results) => {
+                println!(
+                    "Tentativa {attempt}: {} sensores falharam no baseline como esperado.",
+                    results.len()
+                );
+                return Ok((implementation, directory));
+            }
+            Err(error) => {
+                println!("Sensores não passaram na checagem de baseline; solicitando correção.");
+                feedback = Some(error);
+                previous = Some(implementation);
+            }
+        }
+    }
+    Err("Acceptance author não produziu sensores válidos após 3 tentativas.".into())
+}
+
+fn save_sensor_manifest(
+    artifact_dir: &Path,
+    run_id: &str,
+    bundle: &ContractBundle,
+    implementation: &SensorImplementation,
+    sensor_dir: &Path,
+) -> InteractiveResult<()> {
+    let lock = SensorLock::from_suite(&bundle.sensor_suite)?;
+    let scripts = implementation
+        .scripts
+        .iter()
+        .map(|script| {
+            Ok(serde_json::json!({
+                "sensor_id": script.sensor_id,
+                "filename": script.filename,
+                "checksum": script.checksum()?,
+            }))
+        })
+        .collect::<Result<Vec<_>, harness_artifacts::ValidationError>>()?;
+    let manifest = serde_json::json!({
+        "schema_version": SCHEMA_VERSION,
+        "run_id": run_id,
+        "suite_checksum": bundle.sensor_suite.checksum()?,
+        "implementation_checksum": implementation.checksum()?,
+        "sensor_directory": sensor_dir.display().to_string(),
+        "scripts": scripts,
+    });
+    fs::write(
+        artifact_dir.join("sensor_manifest.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    fs::write(
+        artifact_dir.join("sensor_lock.json"),
+        serde_json::to_vec_pretty(&lock)?,
+    )?;
+    Ok(())
+}
+
+fn new_run_id() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("run-{}-{timestamp}", std::process::id())
+}
+
+fn state_root() -> PathBuf {
+    if let Some(directory) = std::env::var_os("HARNESS_STATE_DIR") {
+        return PathBuf::from(directory);
+    }
+    #[cfg(unix)]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".local/state/harness");
+    }
+    std::env::temp_dir().join("harness-state")
+}
+
+fn sensor_directory(run_id: &str) -> PathBuf {
+    state_root().join("runs").join(run_id).join("sensors")
 }
 
 fn collect_understanding(
@@ -222,16 +358,13 @@ fn show_contract(bundle: &ContractBundle) {
 
 fn save_artifacts(
     workspace: &Path,
+    run_id: &str,
     understanding: &Understanding,
     bundle: &ContractBundle,
     revisions: &[ContractRevision],
     states: &[RunState],
 ) -> InteractiveResult<PathBuf> {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let directory = workspace
-        .join(".harness")
-        .join("runs")
-        .join(format!("run-{}-{timestamp}", std::process::id()));
+    let directory = workspace.join(".harness").join("runs").join(run_id);
     fs::create_dir_all(&directory)?;
     fs::write(
         directory.join("understanding.json"),

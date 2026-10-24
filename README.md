@@ -47,4 +47,8 @@ Start an interactive understanding and contract approval flow for the current pr
 cargo run -p harness-cli -- run --request "Uma ferramenta de linha de comando pra organizar minha pasta de downloads."
 ```
 
-The analyst inspects the current directory read-only, asks blocking questions in the terminal, prepares a contract, and revises it after a rejection. On approval, the command saves the understanding, contract, and sensor suite under `.harness/runs/`. M1 stops at approval; task execution for arbitrary requests is not wired yet.
+The analyst inspects the current directory read-only, asks blocking questions in the terminal, prepares a contract, and revises it after a rejection. On approval, the command saves the understanding, contract, and sensor suite under `.harness/runs/`.
+
+It then asks the acceptance author for executable Python sensors, validates them against the approved suite, and runs them against the current workspace. Every sensor must fail before implementation; a sensor that already passes is treated as suspect and sent back for correction. Script sources are kept outside the project under `HARNESS_STATE_DIR` (default `~/.local/state/harness`); `.harness/runs/<run_id>/sensor_manifest.json` records the locked checksums. Planning and task execution are not wired yet.
+
+Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model; otherwise it uses `HARNESS_CODEX_MODEL` or the Codex CLI default.

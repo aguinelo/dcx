@@ -383,6 +383,12 @@ pub struct SensorScript {
     pub source: String,
 }
 
+impl SensorScript {
+    pub fn checksum(&self) -> Result<String, ValidationError> {
+        checksum_of(self)
+    }
+}
+
 impl SensorImplementation {
     pub fn validate_for(&self, suite: &SensorSuite) -> Result<(), ValidationError> {
         if self.schema_version != SCHEMA_VERSION {

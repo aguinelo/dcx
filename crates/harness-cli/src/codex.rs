@@ -7,8 +7,8 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_artifacts::{
-    Contract, ContractBundle, SensorResult, SensorSuite, StepReport, Understanding, Verdict,
-    json_schemas,
+    Contract, ContractBundle, SensorImplementation, SensorResult, SensorSuite, StepReport,
+    Understanding, Verdict, json_schemas,
 };
 use harness_engine::{ExecutionContext, Executor, Verifier};
 use serde::de::DeserializeOwned;
@@ -80,6 +80,51 @@ impl CodexCliAnalyst {
             "read-only",
             workspace,
             "contract_bundle.schema.json",
+            &prompt,
+        )
+    }
+}
+
+pub struct CodexCliAcceptanceAuthor {
+    binary: OsString,
+    model: Option<String>,
+}
+
+impl Default for CodexCliAcceptanceAuthor {
+    fn default() -> Self {
+        Self {
+            binary: std::env::var_os("HARNESS_CODEX_BIN").unwrap_or_else(|| "codex".into()),
+            model: std::env::var("HARNESS_ACCEPTANCE_MODEL")
+                .ok()
+                .or_else(|| std::env::var("HARNESS_CODEX_MODEL").ok()),
+        }
+    }
+}
+
+impl CodexCliAcceptanceAuthor {
+    pub fn implement(
+        &mut self,
+        workspace: &Path,
+        bundle: &ContractBundle,
+        locale: &str,
+        previous: Option<&SensorImplementation>,
+        feedback: Option<&str>,
+    ) -> Result<SensorImplementation, String> {
+        let role =
+            include_str!("../../../prompts/acceptance_author.md").replace("{{locale}}", locale);
+        let prompt = format!(
+            "{role}\n\nContexto desta execução:\n- Locale: {locale}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nContrato aprovado e suíte de sensores:\n{}\n\nImplementação anterior (se houver):\n{}\n\nFeedback de validação ou de baseline (se houver):\n{}\n\nRetorne apenas um sensor_implementation JSON válido, com um script Python para cada sensor da suíte.",
+            workspace.display(),
+            serde_json::to_string_pretty(bundle).map_err(|error| error.to_string())?,
+            serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
+            feedback.unwrap_or("Nenhum."),
+        );
+        invoke_codex(
+            &self.binary,
+            self.model.as_deref(),
+            "read-only",
+            workspace,
+            "sensor_implementation.schema.json",
             &prompt,
         )
     }
