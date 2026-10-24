@@ -200,6 +200,7 @@ pub struct StepReport {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct SensorResult {
     pub sensor_id: String,
+    pub criterion_id: String,
     pub passed: bool,
     pub evidence: String,
 }

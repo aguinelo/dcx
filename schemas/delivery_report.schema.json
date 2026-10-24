@@ -50,6 +50,9 @@
     "SensorResult": {
       "type": "object",
       "properties": {
+        "criterion_id": {
+          "type": "string"
+        },
         "evidence": {
           "type": "string"
         },
@@ -62,6 +65,7 @@
       },
       "required": [
         "sensor_id",
+        "criterion_id",
         "passed",
         "evidence"
       ]

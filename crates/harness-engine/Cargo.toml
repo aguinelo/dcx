@@ -8,5 +8,8 @@ rust-version.workspace = true
 [dependencies]
 harness-artifacts = { path = "../harness-artifacts" }
 
+[dev-dependencies]
+serde_json = "1"
+
 [lints]
 workspace = true
