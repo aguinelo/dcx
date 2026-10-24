@@ -38,13 +38,7 @@ impl CodexCliAnalyst {
         workspace: &Path,
         previous: Option<&Understanding>,
     ) -> Result<Understanding, String> {
-        let role = include_str!("../../../prompts/analyst.understanding.md")
-            .replace("{{locale}}", "pt-BR");
-        let prompt = format!(
-            "{role}\n\nContexto desta execução:\n- Locale: pt-BR\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nPedido:\n{request}\n\nEntendimento anterior e respostas já recebidas (se houver):\n{}\n\nRetorne apenas o artifact understanding, incluindo respostas anteriores e perguntas antigas sem reabri-las.",
-            workspace.display(),
-            serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
-        );
+        let prompt = understanding_prompt(request, workspace, previous)?;
         invoke_codex(
             &self.binary,
             self.model.as_deref(),
@@ -64,16 +58,14 @@ impl CodexCliAnalyst {
         rejection_feedback: Option<&str>,
         validation_feedback: Option<&str>,
     ) -> Result<ContractBundle, String> {
-        let role = include_str!("../../../prompts/analyst.contracting.md");
-        let prompt = format!(
-            "{role}\n\nContexto desta execução:\n- Locale: {}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nPedido original:\n{request}\n\nEntendimento aprovado pelo usuário:\n{}\n\nContrato anterior (se houver):\n{}\n\nFeedback de rejeição do usuário (se houver):\n{}\n\nErros de validação que devem ser corrigidos (se houver):\n{}\n\nRetorne apenas um contract_bundle JSON válido. Preserve ids e redação de critérios inalterados quando estiver refazendo o contrato.",
-            understanding.locale,
-            workspace.display(),
-            serde_json::to_string_pretty(understanding).map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
-            rejection_feedback.unwrap_or("Nenhum."),
-            validation_feedback.unwrap_or("Nenhum."),
-        );
+        let prompt = contract_prompt(
+            request,
+            workspace,
+            understanding,
+            previous,
+            rejection_feedback,
+            validation_feedback,
+        )?;
         invoke_codex(
             &self.binary,
             self.model.as_deref(),
@@ -110,15 +102,7 @@ impl CodexCliAcceptanceAuthor {
         previous: Option<&SensorImplementation>,
         feedback: Option<&str>,
     ) -> Result<SensorImplementation, String> {
-        let role =
-            include_str!("../../../prompts/acceptance_author.md").replace("{{locale}}", locale);
-        let prompt = format!(
-            "{role}\n\nContexto desta execução:\n- Locale: {locale}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nContrato aprovado e suíte de sensores:\n{}\n\nImplementação anterior (se houver):\n{}\n\nFeedback de validação ou de baseline (se houver):\n{}\n\nRetorne apenas um sensor_implementation JSON válido, com um script Python para cada sensor da suíte.",
-            workspace.display(),
-            serde_json::to_string_pretty(bundle).map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
-            feedback.unwrap_or("Nenhum."),
-        );
+        let prompt = acceptance_prompt(workspace, bundle, locale, previous, feedback)?;
         invoke_codex(
             &self.binary,
             self.model.as_deref(),
@@ -153,12 +137,7 @@ impl CodexCliPlanner {
         bundle: &ContractBundle,
         locale: &str,
     ) -> Result<Plan, String> {
-        let role = include_str!("../../../prompts/planner.md").replace("{{locale}}", locale);
-        let prompt = format!(
-            "{role}\n\nContexto desta execução:\n- Locale: {locale}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nContrato aprovado e suíte de sensores:\n{}\n\nRetorne apenas um plan JSON válido que cubra todos os critérios e atribua todos os sensores.",
-            workspace.display(),
-            serde_json::to_string_pretty(bundle).map_err(|error| error.to_string())?,
-        );
+        let prompt = planner_prompt(workspace, bundle, locale)?;
         invoke_codex(
             &self.binary,
             self.model.as_deref(),
@@ -190,20 +169,7 @@ impl Executor for CodexCliExecutor {
         context: &ExecutionContext,
         workspace: &Path,
     ) -> Result<StepReport, String> {
-        let prompt = format!(
-            "Você é o executor do Harness. Implemente apenas o contrato e os critérios abaixo no workspace.\n\
-             Use somente os sensores visíveis fornecidos para autoverificação. Sensores ocultos não fazem parte do seu contexto.\n\
-             Não altere arquivos de sensores, schemas ou fora do workspace. Não faça operações git.\n\
-             Ao terminar, retorne somente um step_report JSON válido no schema fornecido.\n\
-             O campo step_id do step_report deve ser exatamente: {}.\n\
-             Tentativa: {}\nContrato:\n{}\nSensores visíveis:\n{}\nFeedback anterior:\n{}",
-            context.step_id,
-            context.attempt,
-            serde_json::to_string_pretty(&context.contract).map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(&context.visible_sensors)
-                .map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(&context.feedback).map_err(|error| error.to_string())?,
-        );
+        let prompt = executor_prompt(context)?;
         invoke_codex(
             &self.binary,
             self.model.as_deref(),
@@ -240,16 +206,7 @@ impl Verifier for CodexCliVerifier {
         sensor_results: &[SensorResult],
         workspace: &Path,
     ) -> Result<Verdict, String> {
-        let prompt = format!(
-            "Você é o verifier independente. Julgue o contrato e a implementação integrada.\n\
-             Inspecione no workspace os caminhos de files_changed; um caminho ausente pode ter sido removido pela implementação. Não edite nada.\n\
-             Não use histórico de conversa nem suposições. Cada critério precisa de evidência; qualquer sensor de aceite ausente ou reprovado impede aprovação.\n\
-             Retorne somente um verdict JSON válido no schema fornecido.\nContrato:\n{}\nSuíte de sensores (visíveis e ocultos):\n{}\nStep report:\n{}\nResultados dos sensores:\n{}",
-            serde_json::to_string_pretty(contract).map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(suite).map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(step_report).map_err(|error| error.to_string())?,
-            serde_json::to_string_pretty(sensor_results).map_err(|error| error.to_string())?,
-        );
+        let prompt = verifier_prompt(contract, suite, step_report, sensor_results)?;
         invoke_codex(
             &self.binary,
             self.model.as_deref(),
@@ -259,6 +216,104 @@ impl Verifier for CodexCliVerifier {
             &prompt,
         )
     }
+}
+
+pub(crate) fn understanding_prompt(
+    request: &str,
+    workspace: &Path,
+    previous: Option<&Understanding>,
+) -> Result<String, String> {
+    let role =
+        include_str!("../../../prompts/analyst.understanding.md").replace("{{locale}}", "pt-BR");
+    Ok(format!(
+        "{role}\n\nContexto desta execução:\n- Locale: pt-BR\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nPedido:\n{request}\n\nEntendimento anterior e respostas já recebidas (se houver):\n{}\n\nRetorne apenas o artifact understanding, incluindo respostas anteriores e perguntas antigas sem reabri-las.",
+        workspace.display(),
+        serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
+    ))
+}
+
+pub(crate) fn contract_prompt(
+    request: &str,
+    workspace: &Path,
+    understanding: &Understanding,
+    previous: Option<&ContractBundle>,
+    rejection_feedback: Option<&str>,
+    validation_feedback: Option<&str>,
+) -> Result<String, String> {
+    let role = include_str!("../../../prompts/analyst.contracting.md");
+    Ok(format!(
+        "{role}\n\nContexto desta execução:\n- Locale: {}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nPedido original:\n{request}\n\nEntendimento aprovado pelo usuário:\n{}\n\nContrato anterior (se houver):\n{}\n\nFeedback de rejeição do usuário (se houver):\n{}\n\nErros de validação que devem ser corrigidos (se houver):\n{}\n\nRetorne apenas um contract_bundle JSON válido. Preserve ids e redação de critérios inalterados quando estiver refazendo o contrato.",
+        understanding.locale,
+        workspace.display(),
+        serde_json::to_string_pretty(understanding).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
+        rejection_feedback.unwrap_or("Nenhum."),
+        validation_feedback.unwrap_or("Nenhum."),
+    ))
+}
+
+pub(crate) fn acceptance_prompt(
+    workspace: &Path,
+    bundle: &ContractBundle,
+    locale: &str,
+    previous: Option<&SensorImplementation>,
+    feedback: Option<&str>,
+) -> Result<String, String> {
+    let role = include_str!("../../../prompts/acceptance_author.md").replace("{{locale}}", locale);
+    Ok(format!(
+        "{role}\n\nContexto desta execução:\n- Locale: {locale}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nContrato aprovado e suíte de sensores:\n{}\n\nImplementação anterior (se houver):\n{}\n\nFeedback de validação ou de baseline (se houver):\n{}\n\nRetorne apenas um sensor_implementation JSON válido, com um script Python para cada sensor da suíte.",
+        workspace.display(),
+        serde_json::to_string_pretty(bundle).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(&previous).map_err(|error| error.to_string())?,
+        feedback.unwrap_or("Nenhum."),
+    ))
+}
+
+pub(crate) fn planner_prompt(
+    workspace: &Path,
+    bundle: &ContractBundle,
+    locale: &str,
+) -> Result<String, String> {
+    let role = include_str!("../../../prompts/planner.md").replace("{{locale}}", locale);
+    Ok(format!(
+        "{role}\n\nContexto desta execução:\n- Locale: {locale}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nContrato aprovado e suíte de sensores:\n{}\n\nRetorne apenas um plan JSON válido que cubra todos os critérios e atribua todos os sensores.",
+        workspace.display(),
+        serde_json::to_string_pretty(bundle).map_err(|error| error.to_string())?,
+    ))
+}
+
+pub(crate) fn executor_prompt(context: &ExecutionContext) -> Result<String, String> {
+    Ok(format!(
+        "Você é o executor do Harness. Implemente apenas o contrato e os critérios abaixo no workspace.\n\
+         Use somente os sensores visíveis fornecidos para autoverificação. Sensores ocultos não fazem parte do seu contexto.\n\
+         Não altere arquivos de sensores, schemas ou fora do workspace. Não faça operações git.\n\
+         Ao terminar, retorne somente um step_report JSON válido no schema fornecido.\n\
+         O campo step_id do step_report deve ser exatamente: {}.\n\
+         Tentativa: {}\nContrato:\n{}\nSensores visíveis:\n{}\nFeedback anterior:\n{}",
+        context.step_id,
+        context.attempt,
+        serde_json::to_string_pretty(&context.contract).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(&context.visible_sensors).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(&context.feedback).map_err(|error| error.to_string())?,
+    ))
+}
+
+pub(crate) fn verifier_prompt(
+    contract: &Contract,
+    suite: &SensorSuite,
+    step_report: &StepReport,
+    sensor_results: &[SensorResult],
+) -> Result<String, String> {
+    Ok(format!(
+        "Você é o verifier independente. Julgue o contrato e a implementação integrada.\n\
+         Inspecione no workspace os caminhos de files_changed; um caminho ausente pode ter sido removido pela implementação. Não edite nada.\n\
+         Não use histórico de conversa nem suposições. Cada critério precisa de evidência; qualquer sensor de aceite ausente ou reprovado impede aprovação.\n\
+         Retorne somente um verdict JSON válido no schema fornecido.\nContrato:\n{}\nSuíte de sensores (visíveis e ocultos):\n{}\nStep report:\n{}\nResultados dos sensores:\n{}",
+        serde_json::to_string_pretty(contract).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(suite).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(step_report).map_err(|error| error.to_string())?,
+        serde_json::to_string_pretty(sensor_results).map_err(|error| error.to_string())?,
+    ))
 }
 
 fn invoke_codex<T: DeserializeOwned>(

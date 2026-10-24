@@ -22,7 +22,11 @@ pub enum AppliedChange {
     Deleted(String),
 }
 
-pub fn copy_project(source: &Path, destination: &Path) -> Result<(), String> {
+pub fn copy_project(
+    source: &Path,
+    destination: &Path,
+    excluded: &[std::path::PathBuf],
+) -> Result<(), String> {
     if destination.exists() {
         fs::remove_dir_all(destination).map_err(|error| {
             format!(
@@ -37,11 +41,20 @@ pub fn copy_project(source: &Path, destination: &Path) -> Result<(), String> {
             destination.display()
         )
     })?;
+    let excluded = excluded
+        .iter()
+        .filter_map(|path| fs::canonicalize(path).ok())
+        .collect::<Vec<_>>();
     let mut total = 0_u64;
-    copy_directory(source, destination, &mut total)
+    copy_directory(source, destination, &mut total, &excluded)
 }
 
-fn copy_directory(source: &Path, destination: &Path, total: &mut u64) -> Result<(), String> {
+fn copy_directory(
+    source: &Path,
+    destination: &Path,
+    total: &mut u64,
+    excluded: &[std::path::PathBuf],
+) -> Result<(), String> {
     let entries = fs::read_dir(source)
         .map_err(|error| format!("cannot read {}: {error}", source.display()))?;
     for entry in entries {
@@ -54,6 +67,15 @@ fn copy_directory(source: &Path, destination: &Path, total: &mut u64) -> Result<
             continue;
         }
         let path = entry.path();
+        if !excluded.is_empty() {
+            let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            if excluded
+                .iter()
+                .any(|excluded| canonical.starts_with(excluded))
+            {
+                continue;
+            }
+        }
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
         if metadata.file_type().is_symlink() {
@@ -64,7 +86,7 @@ fn copy_directory(source: &Path, destination: &Path, total: &mut u64) -> Result<
             fs::create_dir_all(&target).map_err(|error| {
                 format!("cannot create directory {}: {error}", target.display())
             })?;
-            copy_directory(&path, &target, total)?;
+            copy_directory(&path, &target, total, excluded)?;
         } else if metadata.is_file() {
             if metadata.len() > MAX_FILE_BYTES {
                 return Err(format!(
@@ -166,12 +188,16 @@ mod tests {
         fs::write(source.join("target/debug.bin"), "bin").expect("binário");
         fs::create_dir_all(source.join(".git")).expect("git");
         fs::write(source.join(".git/HEAD"), "ref").expect("head");
+        let state = source.join("state");
+        fs::create_dir_all(&state).expect("state");
+        fs::write(state.join("run.json"), "{}").expect("state file");
 
-        copy_project(&source, &destination).expect("copiar projeto");
+        copy_project(&source, &destination, &[state]).expect("copiar projeto");
 
         assert!(destination.join("main.py").is_file());
         assert!(!destination.join("target").exists());
         assert!(!destination.join(".git").exists());
+        assert!(!destination.join("state").exists());
     }
 
     #[test]

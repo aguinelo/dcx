@@ -28,7 +28,7 @@ impl ExecutionContext {
         attempt: u32,
         feedback: Vec<String>,
     ) -> Result<Self, harness_artifacts::ValidationError> {
-        suite.validate_for(contract)?;
+        suite.validate_for_step(contract)?;
         Ok(Self {
             contract: contract.clone(),
             visible_sensors: suite
@@ -132,6 +132,25 @@ impl RunCoordinator {
         request: RunRequest<'_>,
         participants: RunParticipants<'_>,
     ) -> Result<RunExecution, String> {
+        self.execute_inner(request, participants, false)
+    }
+
+    /// Executes one plan step whose contract and suite may cover a subset of
+    /// the full run. The step suite does not need its own hidden sensor.
+    pub fn execute_step(
+        &self,
+        request: RunRequest<'_>,
+        participants: RunParticipants<'_>,
+    ) -> Result<RunExecution, String> {
+        self.execute_inner(request, participants, true)
+    }
+
+    fn execute_inner(
+        &self,
+        request: RunRequest<'_>,
+        participants: RunParticipants<'_>,
+        step_scoped: bool,
+    ) -> Result<RunExecution, String> {
         let RunRequest {
             contract,
             suite,
@@ -144,9 +163,15 @@ impl RunCoordinator {
             verifier,
         } = participants;
         contract.validate().map_err(|error| error.to_string())?;
-        suite
-            .validate_for(contract)
-            .map_err(|error| error.to_string())?;
+        if step_scoped {
+            suite
+                .validate_for_step(contract)
+                .map_err(|error| error.to_string())?;
+        } else {
+            suite
+                .validate_for(contract)
+                .map_err(|error| error.to_string())?;
+        }
         let mut lifecycle = RunLifecycle::new();
         for next in [
             RunState::Understanding,
@@ -1227,6 +1252,57 @@ mod tests {
         assert!(!executor.feedback[1].is_empty());
         assert_eq!(sensor_runner.visible_runs, 2);
         assert_eq!(sensor_runner.hidden_runs, 1);
+    }
+
+    #[test]
+    fn step_scoped_execution_accepts_a_suite_without_hidden_sensors() {
+        let contract = Contract {
+            schema_version: SCHEMA_VERSION,
+            objective: "objective".into(),
+            assumptions: vec![],
+            criteria: vec![Criterion {
+                id: "criterion".into(),
+                description: "observable".into(),
+            }],
+            interface: serde_json::Value::Null,
+            constraints: vec![],
+            out_of_scope: vec![],
+        };
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![SensorSpec {
+                id: "visible".into(),
+                criterion_id: "criterion".into(),
+                sensor_type: SensorType::Test,
+                kind: SensorKind::Computational,
+                visibility: SensorVisibility::Visible,
+                purpose: "acceptance".into(),
+                check: "visible check".into(),
+            }],
+        };
+        let mut executor = CountingExecutor::default();
+        let mut sensor_runner = RetrySensorRunner::default();
+        let mut verifier = AlwaysApproveVerifier;
+        let execution = RunCoordinator::new(2)
+            .expect("valid coordinator")
+            .stop_at_merge(true)
+            .execute_step(
+                RunRequest {
+                    contract: &contract,
+                    suite: &suite,
+                    step_id: "step-1",
+                    workspace: Path::new("."),
+                },
+                RunParticipants {
+                    executor: &mut executor,
+                    sensor_runner: &mut sensor_runner,
+                    verifier: &mut verifier,
+                },
+            )
+            .expect("step execution succeeds");
+
+        assert!(execution.verdict.approved);
+        assert_eq!(execution.states.last(), Some(&RunState::AwaitingMerge));
     }
 
     #[test]

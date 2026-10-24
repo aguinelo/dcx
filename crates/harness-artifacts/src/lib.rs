@@ -163,6 +163,17 @@ pub struct Contract {
 }
 
 impl Contract {
+    pub fn for_criteria(&self, ids: &[String]) -> Self {
+        let mut contract = self.clone();
+        contract.criteria = self
+            .criteria
+            .iter()
+            .filter(|criterion| ids.iter().any(|id| id == &criterion.id))
+            .cloned()
+            .collect();
+        contract
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
         if self.schema_version != SCHEMA_VERSION {
             return Err(ValidationError::new("unsupported contract schema_version"));
@@ -277,7 +288,33 @@ pub struct SensorSuite {
 }
 
 impl SensorSuite {
+    pub fn for_criteria(&self, ids: &[String]) -> Self {
+        Self {
+            schema_version: self.schema_version,
+            sensors: self
+                .sensors
+                .iter()
+                .filter(|sensor| ids.iter().any(|id| id == &sensor.criterion_id))
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub fn validate_for(&self, contract: &Contract) -> Result<(), ValidationError> {
+        self.validate_common(contract, true)
+    }
+
+    /// Validates a suite scoped to one plan step, where the hidden sensor may
+    /// belong to a criterion handled by another step.
+    pub fn validate_for_step(&self, contract: &Contract) -> Result<(), ValidationError> {
+        self.validate_common(contract, false)
+    }
+
+    fn validate_common(
+        &self,
+        contract: &Contract,
+        require_hidden: bool,
+    ) -> Result<(), ValidationError> {
         contract.validate()?;
         if self.schema_version != SCHEMA_VERSION {
             return Err(ValidationError::new(
@@ -341,10 +378,11 @@ impl SensorSuite {
                 )));
             }
         }
-        if !self
-            .sensors
-            .iter()
-            .any(|sensor| sensor.visibility == SensorVisibility::Hidden)
+        if require_hidden
+            && !self
+                .sensors
+                .iter()
+                .any(|sensor| sensor.visibility == SensorVisibility::Hidden)
         {
             return Err(ValidationError::new(
                 "sensor_suite must contain at least one hidden sensor",
@@ -757,6 +795,53 @@ impl Plan {
             visit(&step.id, &steps, &mut visiting, &mut visited)?;
         }
         Ok(())
+    }
+}
+
+impl Plan {
+    pub fn ordered_steps(&self) -> Result<Vec<&PlanStep>, ValidationError> {
+        let mut remaining = self
+            .steps
+            .iter()
+            .map(|step| (step.id.as_str(), step.depends_on.len()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut dependents = std::collections::HashMap::<&str, Vec<&str>>::new();
+        for step in &self.steps {
+            for dependency in &step.depends_on {
+                dependents
+                    .entry(dependency.as_str())
+                    .or_default()
+                    .push(step.id.as_str());
+            }
+        }
+        let mut ready = self
+            .steps
+            .iter()
+            .filter(|step| step.depends_on.is_empty())
+            .map(|step| step.id.as_str())
+            .collect::<std::collections::VecDeque<_>>();
+        let mut ordered = Vec::with_capacity(self.steps.len());
+        while let Some(id) = ready.pop_front() {
+            let step = self
+                .steps
+                .iter()
+                .find(|step| step.id == id)
+                .expect("plan step exists");
+            ordered.push(step);
+            for dependent in dependents.get(id).into_iter().flatten() {
+                let count = remaining.get_mut(dependent).expect("plan step exists");
+                *count -= 1;
+                if *count == 0 {
+                    ready.push_back(dependent);
+                }
+            }
+        }
+        if ordered.len() != self.steps.len() {
+            return Err(ValidationError::new(
+                "plan dependency cycle prevents execution order",
+            ));
+        }
+        Ok(ordered)
     }
 }
 
@@ -1266,6 +1351,44 @@ mod tests {
         });
         cyclic.steps[0].depends_on.push("second".into());
         assert!(cyclic.validate_for(&contract(), &suite()).is_err());
+    }
+
+    #[test]
+    fn scoped_contract_and_suite_allow_steps_without_hidden_sensors() {
+        let contract = contract();
+        let scoped_contract = contract.for_criteria(&["records".into()]);
+        assert_eq!(scoped_contract.criteria.len(), 1);
+
+        let visible_only = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![sensor(SensorVisibility::Visible)],
+        };
+        let scoped = visible_only.for_criteria(&["records".into()]);
+        assert!(visible_only.validate_for(&contract).is_err());
+        assert!(scoped.validate_for_step(&scoped_contract).is_ok());
+    }
+
+    #[test]
+    fn plan_orders_steps_by_dependencies() {
+        let mut plan = plan();
+        plan.steps.push(PlanStep {
+            id: "integrate".into(),
+            title: "Integrar".into(),
+            description: "Validar a entrega completa".into(),
+            criteria: vec!["records".into()],
+            sensors: vec!["records-sensor".into(), "hidden-records-sensor".into()],
+            depends_on: vec!["convert".into()],
+            files_hint: vec![],
+        });
+        plan.integration_step_id = "integrate".into();
+        let ordered = plan.ordered_steps().expect("ordem válida");
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|step| step.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["convert", "integrate"]
+        );
     }
 
     fn assert_closed_objects(value: &serde_json::Value) {

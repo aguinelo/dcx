@@ -5,16 +5,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::codex::{
-    CodexCliAcceptanceAuthor, CodexCliAnalyst, CodexCliExecutor, CodexCliPlanner, CodexCliVerifier,
-};
+use crate::providers::{self, Analyst};
 use harness_artifacts::{
-    Answer, ContractBundle, DeliveryReport, SCHEMA_VERSION, SensorImplementation, SensorLock,
+    Answer, ContractBundle, DeliveryReport, Plan, SCHEMA_VERSION, SensorImplementation, SensorLock,
     SensorVisibility, Understanding,
 };
 use harness_engine::{
-    RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
-    check_sensors_fail,
+    Executor, RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
+    Verifier, check_sensors_fail,
 };
 use harness_sensors::ScriptSensorRunner;
 
@@ -28,12 +26,13 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     }
 
     let workspace = std::env::current_dir()?;
-    let mut analyst = CodexCliAnalyst::default();
+    let mut analyst = providers::analyst()?;
     let mut lifecycle = RunLifecycle::new();
     lifecycle.transition(RunState::Understanding)?;
     println!("Entendendo o pedido em {}", workspace.display());
 
-    let understanding = collect_understanding(request, &workspace, &mut analyst, &mut lifecycle)?;
+    let understanding =
+        collect_understanding(request, &workspace, analyst.as_mut(), &mut lifecycle)?;
     lifecycle.transition(RunState::Contracting)?;
     println!("\nPreparando contrato para aprovação.");
 
@@ -41,7 +40,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         request,
         &workspace,
         &understanding,
-        &mut analyst,
+        analyst.as_mut(),
         &mut lifecycle,
     )?;
     lifecycle.transition(RunState::AcceptanceAuthoring)?;
@@ -79,18 +78,12 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     );
 
     lifecycle.transition(RunState::Planning)?;
-    let mut planner = CodexCliPlanner::default();
+    let mut planner = providers::planner()?;
     let plan = planner
         .plan(&workspace, &approved_bundle, &understanding.locale)
         .map_err(|error| format!("Planner não conseguiu produzir o plano: {error}"))?;
     plan.validate_for(&approved_bundle.contract, &approved_bundle.sensor_suite)
         .map_err(|error| format!("Plano inválido: {error}"))?;
-    if plan.steps.len() != 1 || plan.integration_step_id != plan.steps[0].id {
-        return Err(
-            "Planos com vários passos ainda não são suportados; o plano deve ter um único passo de integração."
-                .into(),
-        );
-    }
     fs::write(
         artifact_dir.join("plan.json"),
         serde_json::to_vec_pretty(&plan)?,
@@ -101,7 +94,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     );
 
     let run_workspace = state_root().join("runs").join(&run_id).join("workspace");
-    workspace::copy_project(&workspace, &run_workspace)
+    workspace::copy_project(&workspace, &run_workspace, &[state_root()])
         .map_err(|error| format!("Não foi possível preparar a cópia isolada: {error}"))?;
     println!("Executando em cópia isolada: {}", run_workspace.display());
 
@@ -114,24 +107,16 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?;
     let lock = SensorLock::from_suite(&approved_bundle.sensor_suite)?;
     lock.verify(&approved_bundle.sensor_suite)?;
-    let mut executor = CodexCliExecutor::default();
-    let mut verifier = CodexCliVerifier::default();
-    let execution = RunCoordinator::with_verification_limit(3, 3)?
-        .stop_at_merge(true)
-        .execute(
-            RunRequest {
-                contract: &approved_bundle.contract,
-                suite: &approved_bundle.sensor_suite,
-                step_id: &plan.steps[0].id,
-                workspace: &run_workspace,
-            },
-            RunParticipants {
-                executor: &mut executor,
-                sensor_runner: &mut runner,
-                verifier: &mut verifier,
-            },
-        )
-        .map_err(std::io::Error::other)?;
+    let mut executor = providers::executor()?;
+    let mut verifier = providers::verifier()?;
+    let execution = execute_plan(
+        &run_workspace,
+        &plan,
+        &approved_bundle,
+        &mut runner,
+        executor.as_mut(),
+        verifier.as_mut(),
+    )?;
     save_execution(&artifact_dir, &run_id, &execution)?;
     println!(
         "\nExecução concluída. Estado: {}",
@@ -164,6 +149,55 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         );
         Err("A execução não foi aprovada; veja o veredito e as issues no relatório.".into())
     }
+}
+
+fn execute_plan(
+    workspace: &Path,
+    plan: &Plan,
+    bundle: &ContractBundle,
+    runner: &mut ScriptSensorRunner,
+    executor: &mut dyn Executor,
+    verifier: &mut dyn Verifier,
+) -> InteractiveResult<RunExecution> {
+    let coordinator = RunCoordinator::with_verification_limit(3, 3)?.stop_at_merge(true);
+    let mut step_reports = Vec::new();
+    let mut sensor_results = Vec::new();
+    let mut states = Vec::new();
+    let mut verdict = None;
+    for step in plan.ordered_steps()? {
+        let contract = bundle.contract.for_criteria(&step.criteria);
+        let suite = bundle.sensor_suite.for_criteria(&step.criteria);
+        println!("Executando passo {}: {}", step.id, step.title);
+        let execution = coordinator
+            .execute_step(
+                RunRequest {
+                    contract: &contract,
+                    suite: &suite,
+                    step_id: &step.id,
+                    workspace,
+                },
+                RunParticipants {
+                    executor: &mut *executor,
+                    sensor_runner: &mut *runner,
+                    verifier: &mut *verifier,
+                },
+            )
+            .map_err(std::io::Error::other)?;
+        step_reports.extend(execution.step_reports);
+        sensor_results.extend(execution.sensor_results);
+        states = execution.states;
+        let approved = execution.verdict.approved;
+        verdict = Some(execution.verdict);
+        if !approved {
+            break;
+        }
+    }
+    Ok(RunExecution {
+        step_reports,
+        sensor_results,
+        verdict: verdict.ok_or("Plano sem passos executáveis.")?,
+        states,
+    })
 }
 
 fn save_execution(
@@ -247,7 +281,7 @@ fn author_sensors(
     locale: &str,
     run_id: &str,
 ) -> InteractiveResult<(SensorImplementation, PathBuf)> {
-    let mut author = CodexCliAcceptanceAuthor::default();
+    let mut author = providers::acceptance_author()?;
     let mut previous: Option<SensorImplementation> = None;
     let mut feedback: Option<String> = None;
     let directory = sensor_directory(run_id);
@@ -355,7 +389,7 @@ fn sensor_directory(run_id: &str) -> PathBuf {
 fn collect_understanding(
     request: &str,
     workspace: &Path,
-    analyst: &mut CodexCliAnalyst,
+    analyst: &mut dyn Analyst,
     lifecycle: &mut RunLifecycle,
 ) -> InteractiveResult<Understanding> {
     let mut previous: Option<Understanding> = None;
@@ -434,7 +468,7 @@ fn collect_approved_contract(
     request: &str,
     workspace: &Path,
     understanding: &Understanding,
-    analyst: &mut CodexCliAnalyst,
+    analyst: &mut dyn Analyst,
     lifecycle: &mut RunLifecycle,
 ) -> InteractiveResult<(ContractBundle, Vec<ContractRevision>)> {
     let mut previous: Option<ContractBundle> = None;

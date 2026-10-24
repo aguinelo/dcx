@@ -1,6 +1,8 @@
+mod claude;
 mod codex;
 mod demo;
 mod interactive;
+mod providers;
 mod schemas;
 mod workspace;
 

@@ -33,7 +33,7 @@ cargo run -p harness-cli -- schemas --write
 
 `harness run --demo` exercises a deterministic smoke path with a built-in worker and acceptance sensors. It does not call a model provider or provide an OS security sandbox, so it is not an evaluation of the MVP thesis and must not be used with untrusted code. `harness run --pilot` uses the installed Codex CLI for the executor and verifier; it applies the CLI's workspace-write and read-only sandbox modes.
 
-The pilot currently targets the local Codex CLI adapter. Other providers remain future adapters behind the engine role interfaces.
+The harness supports two local model providers behind the same role interfaces: `codex` (default) and `claude`. Select one with `HARNESS_PROVIDER=claude`; each role uses its own CLI sandbox or permission mode.
 
 The engine derives `step_report.files_changed` from workspace snapshots around each executor attempt, instead of trusting the executor's own list. Snapshots skip symlinks and enforce 16 MiB per file and 64 MiB per workspace limits.
 
@@ -53,6 +53,6 @@ It then asks the acceptance author for executable Python sensors, validates them
 
 After the sensors are locked, the planner produces a versioned plan. The executor implements it with `workspace-write` in an isolated copy under `HARNESS_STATE_DIR/runs/<run_id>/workspace`, and the verifier checks that copy with `read-only`. Visible sensors guide retries; hidden sensors run only during verification. The run stops at `awaiting_merge` and writes `plan.json`, `step_reports.json`, `sensor_results.json`, `verdict.json` and `delivery_report.json` under `.harness/runs/<run_id>/`.
 
-If the run is approved, only the changed files are copied back into the project for review and merge. If it is rejected, the project is left untouched and the execution copy is preserved for inspection. The current milestone executes one integration step; multi-step plans are not wired yet.
+If the run is approved, only the changed files are copied back into the project for review and merge. If it is rejected, the project is left untouched and the execution copy is preserved for inspection. Plan steps run in dependency order, each with the criteria and sensors it covers; the integration step validates the full contract.
 
-Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. Each falls back to `HARNESS_CODEX_MODEL` or the Codex CLI default.
+Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. With Codex, each falls back to `HARNESS_CODEX_MODEL` or the CLI default; with Claude, to `HARNESS_CLAUDE_MODEL` or the CLI default. Set `HARNESS_CLAUDE_BIN` to override the Claude executable.
