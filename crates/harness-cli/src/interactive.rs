@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
@@ -16,6 +17,8 @@ use harness_engine::{
     check_sensors_fail,
 };
 use harness_sensors::ScriptSensorRunner;
+
+use crate::workspace;
 
 type InteractiveResult<T> = Result<T, Box<dyn Error>>;
 
@@ -97,6 +100,11 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         artifact_dir.join("plan.json").display()
     );
 
+    let run_workspace = state_root().join("runs").join(&run_id).join("workspace");
+    workspace::copy_project(&workspace, &run_workspace)
+        .map_err(|error| format!("Não foi possível preparar a cópia isolada: {error}"))?;
+    println!("Executando em cópia isolada: {}", run_workspace.display());
+
     lifecycle.transition(RunState::Executing)?;
     let mut runner = ScriptSensorRunner::materialize(
         &implementation,
@@ -115,7 +123,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
                 contract: &approved_bundle.contract,
                 suite: &approved_bundle.sensor_suite,
                 step_id: &plan.steps[0].id,
-                workspace: &workspace,
+                workspace: &run_workspace,
             },
             RunParticipants {
                 executor: &mut executor,
@@ -134,9 +142,26 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         artifact_dir.join("delivery_report.json").display()
     );
     if execution.verdict.approved {
+        let changed = execution
+            .step_reports
+            .iter()
+            .flat_map(|report| report.files_changed.iter().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let applied = workspace::apply_changes(&workspace, &run_workspace, &changed)
+            .map_err(|error| format!("Não foi possível aplicar as mudanças aprovadas: {error}"))?;
+        println!(
+            "{} arquivo(s) aplicados ao projeto após a aprovação.",
+            applied.len()
+        );
         println!("Revise as mudanças no workspace e faça o merge.");
         Ok(())
     } else {
+        println!(
+            "A cópia com a execução reprovada foi preservada em {}",
+            run_workspace.display()
+        );
         Err("A execução não foi aprovada; veja o veredito e as issues no relatório.".into())
     }
 }

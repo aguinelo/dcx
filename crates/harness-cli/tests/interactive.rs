@@ -296,6 +296,7 @@ fn blocking_question_is_answered_before_contract_approval() {
     assert_eq!(verdict["approved"], true);
     assert_eq!(verdict["criteria"].as_array().expect("critérios").len(), 1);
     assert!(run.join("delivery_report.json").is_file());
+    assert!(project.join("implemented.txt").is_file());
 }
 
 #[test]
@@ -370,4 +371,5 @@ fn rejected_contract_keeps_previous_wording_and_revises() {
         serde_json::from_slice(&fs::read(run.join("verdict.json")).expect("veredito"))
             .expect("veredito JSON");
     assert_eq!(verdict["approved"], true);
+    assert!(project.join("implemented.txt").is_file());
 }

@@ -2,6 +2,7 @@ mod codex;
 mod demo;
 mod interactive;
 mod schemas;
+mod workspace;
 
 use harness_engine::RunState;
 
