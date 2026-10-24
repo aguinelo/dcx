@@ -271,6 +271,7 @@ impl RunCoordinator {
 
             let mut verdict =
                 verifier.verify(contract, suite, &step_report, &sensor_results, workspace)?;
+            sanitize_verdict(&mut verdict, suite);
             verification_rounds += 1;
             let verdict_covers_all_criteria = verdict.criteria.len() == contract.criteria.len()
                 && contract.criteria.iter().all(|criterion| {
@@ -426,6 +427,37 @@ pub fn check_sensors_fail(
         ));
     }
     Ok(results)
+}
+
+/// Removes hidden-sensor identifiers and check text from a verifier verdict
+/// before it is fed back to the executor or written to artifacts.
+pub fn sanitize_verdict(verdict: &mut Verdict, suite: &SensorSuite) {
+    let secrets = suite
+        .sensors
+        .iter()
+        .filter(|sensor| sensor.visibility == SensorVisibility::Hidden)
+        .flat_map(|sensor| [sensor.id.clone(), sensor.check.clone()])
+        .filter(|secret| !secret.trim().is_empty())
+        .collect::<Vec<_>>();
+    if secrets.is_empty() {
+        return;
+    }
+    let leaks = |text: &str| secrets.iter().any(|secret| text.contains(secret));
+    for criterion in &mut verdict.criteria {
+        criterion.evidence.retain(|evidence| !leaks(evidence));
+    }
+    for issue in &mut verdict.issues {
+        if leaks(&issue.description) {
+            issue.description =
+                "An acceptance check for this criterion failed or returned no passing result."
+                    .to_owned();
+        }
+    }
+    for note in &mut verdict.notes {
+        if leaks(note) {
+            *note = "Verification details are restricted.".to_owned();
+        }
+    }
 }
 
 fn visible_failure_verdict(
@@ -1365,5 +1397,54 @@ mod tests {
 
         assert!(execution.verdict.approved);
         assert_eq!(execution.states.last(), Some(&RunState::AwaitingMerge));
+    }
+
+    #[test]
+    fn sanitize_verdict_removes_hidden_sensor_details() {
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![
+                SensorSpec {
+                    id: "visible".into(),
+                    criterion_id: "criterion".into(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: SensorVisibility::Visible,
+                    purpose: "acceptance".into(),
+                    check: "visible check".into(),
+                },
+                SensorSpec {
+                    id: "hidden".into(),
+                    criterion_id: "criterion".into(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: SensorVisibility::Hidden,
+                    purpose: "acceptance".into(),
+                    check: "hidden check".into(),
+                },
+            ],
+        };
+        let mut verdict = Verdict {
+            schema_version: SCHEMA_VERSION,
+            approved: false,
+            criteria: vec![CriterionVerdict {
+                criterion_id: "criterion".into(),
+                passed: false,
+                evidence: vec![
+                    "visible: ok".into(),
+                    "hidden: hidden check failed with fixture".into(),
+                ],
+            }],
+            issues: vec![harness_artifacts::VerdictIssue {
+                criterion_id: "criterion".into(),
+                description: "hidden failed because hidden check".into(),
+                severity: harness_artifacts::IssueSeverity::Blocker,
+            }],
+            notes: vec!["hidden check detail".into()],
+        };
+        super::sanitize_verdict(&mut verdict, &suite);
+        assert_eq!(verdict.criteria[0].evidence, vec!["visible: ok"]);
+        assert!(!verdict.issues[0].description.contains("hidden"));
+        assert_eq!(verdict.notes, vec!["Verification details are restricted."]);
     }
 }

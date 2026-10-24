@@ -1,0 +1,90 @@
+{
+  "$defs": {
+    "SensorKind": {
+      "enum": [
+        "computational",
+        "inferential"
+      ],
+      "type": "string"
+    },
+    "SensorSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "criterion_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SensorKind"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/SensorType"
+        },
+        "visibility": {
+          "$ref": "#/$defs/SensorVisibility"
+        }
+      },
+      "required": [
+        "check",
+        "criterion_id",
+        "id",
+        "kind",
+        "purpose",
+        "type",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SensorType": {
+      "enum": [
+        "test",
+        "command",
+        "query",
+        "judge"
+      ],
+      "type": "string"
+    },
+    "SensorVisibility": {
+      "enum": [
+        "visible",
+        "hidden"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Human decision for a sensor dispute. An accepted dispute must carry a\nreplacement sensor with the same id and criterion; all other sensors stay\nbyte-for-byte unchanged.",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "note": {
+      "type": "string"
+    },
+    "replacement": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SensorSpec"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "accepted",
+    "note",
+    "replacement"
+  ],
+  "title": "DisputeDecision",
+  "type": "object"
+}

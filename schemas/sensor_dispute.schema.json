@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "description": "A request from the executor to replace one acceptance sensor.",
+  "properties": {
+    "reason": {
+      "type": "string"
+    },
+    "requested_by": {
+      "type": "string"
+    },
+    "sensor_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reason",
+    "requested_by",
+    "sensor_id"
+  ],
+  "title": "SensorDispute",
+  "type": "object"
+}

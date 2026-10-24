@@ -300,6 +300,18 @@ impl SensorSuite {
         }
     }
 
+    pub fn for_step(&self, step: &PlanStep) -> Self {
+        Self {
+            schema_version: self.schema_version,
+            sensors: self
+                .sensors
+                .iter()
+                .filter(|sensor| step.sensors.iter().any(|id| id == &sensor.id))
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub fn validate_for(&self, contract: &Contract) -> Result<(), ValidationError> {
         self.validate_common(contract, true)
     }
@@ -569,6 +581,66 @@ impl SensorLock {
         }
         Ok(())
     }
+}
+
+/// A request from the executor to replace one acceptance sensor.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct SensorDispute {
+    pub sensor_id: String,
+    pub reason: String,
+    pub requested_by: String,
+}
+
+/// Human decision for a sensor dispute. An accepted dispute must carry a
+/// replacement sensor with the same id and criterion; all other sensors stay
+/// byte-for-byte unchanged.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct DisputeDecision {
+    pub accepted: bool,
+    pub replacement: Option<SensorSpec>,
+    pub note: String,
+}
+
+pub fn resolve_sensor_dispute(
+    suite: &SensorSuite,
+    dispute: &SensorDispute,
+    decision: &DisputeDecision,
+) -> Result<SensorSuite, ValidationError> {
+    if dispute.reason.trim().is_empty() || dispute.requested_by.trim().is_empty() {
+        return Err(ValidationError::new(
+            "sensor dispute needs a reason and requested_by",
+        ));
+    }
+    let index = suite
+        .sensors
+        .iter()
+        .position(|sensor| sensor.id == dispute.sensor_id)
+        .ok_or_else(|| {
+            ValidationError::new(format!(
+                "sensor dispute references unknown sensor {}",
+                dispute.sensor_id
+            ))
+        })?;
+    if !decision.accepted {
+        return Ok(suite.clone());
+    }
+    let replacement = decision.replacement.as_ref().ok_or_else(|| {
+        ValidationError::new("accepted sensor dispute needs a replacement sensor")
+    })?;
+    let original = &suite.sensors[index];
+    if replacement.id != original.id || replacement.criterion_id != original.criterion_id {
+        return Err(ValidationError::new(
+            "replacement sensor must keep the disputed id and criterion",
+        ));
+    }
+    if replacement.check.trim().is_empty() || replacement.purpose != "acceptance" {
+        return Err(ValidationError::new(
+            "replacement sensor must have a check and acceptance purpose",
+        ));
+    }
+    let mut updated = suite.clone();
+    updated.sensors[index] = replacement.clone();
+    Ok(updated)
 }
 
 fn checksum_of<T: Serialize>(value: &T) -> Result<String, ValidationError> {
@@ -978,6 +1050,14 @@ pub fn json_schemas() -> Result<Vec<(&'static str, String)>, serde_json::Error> 
             "sensor_suite.schema.json",
             serialize_schema::<SensorSuite>()?,
         ),
+        (
+            "sensor_dispute.schema.json",
+            serialize_schema::<SensorDispute>()?,
+        ),
+        (
+            "dispute_decision.schema.json",
+            serialize_schema::<DisputeDecision>()?,
+        ),
         ("sensor_lock.schema.json", serialize_schema::<SensorLock>()?),
         (
             "sensor_implementation.schema.json",
@@ -1224,7 +1304,7 @@ mod tests {
     #[test]
     fn schemas_are_generated_for_all_mvp_artifacts() {
         let schemas = json_schemas().expect("schemas serializáveis");
-        assert_eq!(schemas.len(), 12);
+        assert_eq!(schemas.len(), 14);
         assert!(
             schemas
                 .iter()
@@ -1366,6 +1446,39 @@ mod tests {
         let scoped = visible_only.for_criteria(&["records".into()]);
         assert!(visible_only.validate_for(&contract).is_err());
         assert!(scoped.validate_for_step(&scoped_contract).is_ok());
+    }
+
+    #[test]
+    fn dispute_rewrites_only_the_contested_sensor() {
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![
+                sensor(SensorVisibility::Visible),
+                sensor(SensorVisibility::Hidden),
+            ],
+        };
+        let mut replacement = sensor(SensorVisibility::Hidden);
+        replacement.check = "Novo check para o mesmo critério".into();
+        let updated = resolve_sensor_dispute(
+            &suite,
+            &SensorDispute {
+                sensor_id: "records-sensor".into(),
+                reason: "o check antigo dependia de um caminho inexistente".into(),
+                requested_by: "executor".into(),
+            },
+            &DisputeDecision {
+                accepted: true,
+                replacement: Some(replacement.clone()),
+                note: "aceito".into(),
+            },
+        )
+        .expect("disputa aceita");
+        assert_eq!(updated.sensors[0], replacement);
+        assert_eq!(updated.sensors[1], suite.sensors[1]);
+        assert_ne!(
+            updated.checksum().expect("checksum"),
+            suite.checksum().expect("checksum")
+        );
     }
 
     #[test]

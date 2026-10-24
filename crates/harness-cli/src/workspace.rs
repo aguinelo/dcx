@@ -1,7 +1,5 @@
 use std::fs;
-#[cfg(test)]
-use std::path::PathBuf;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
@@ -115,50 +113,158 @@ pub fn apply_changes(
     executed: &Path,
     paths: &[String],
 ) -> Result<Vec<AppliedChange>, String> {
-    let mut applied = Vec::new();
+    let mut relatives = Vec::with_capacity(paths.len());
     for path in paths {
         let relative = Path::new(path);
-        if relative.is_absolute()
+        if path.trim().is_empty()
+            || relative.is_absolute()
             || relative
                 .components()
                 .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
         {
             return Err(format!("refusing to apply unsafe path: {path}"));
         }
-        let source = executed.join(relative);
+        relatives.push(relative.to_path_buf());
+    }
+
+    let backup = backup_directory();
+    fs::create_dir_all(&backup).map_err(|error| format!("cannot create apply backup: {error}"))?;
+    let mut originals = Vec::with_capacity(relatives.len());
+    for relative in &relatives {
         let target = original.join(relative);
-        let source_metadata = fs::symlink_metadata(&source).ok();
-        if source_metadata
-            .as_ref()
-            .is_some_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-        {
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let _ = fs::remove_dir_all(&backup);
+                return Err(format!(
+                    "refusing to replace symlink while applying {}",
+                    relative.display()
+                ));
             }
-            if target
-                .symlink_metadata()
-                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            Ok(metadata) if metadata.is_dir() => {
+                let _ = fs::remove_dir_all(&backup);
+                return Err(format!(
+                    "refusing to replace directory while applying {}",
+                    relative.display()
+                ));
+            }
+            Ok(_) => {
+                let saved = backup.join(relative);
+                if let Some(parent) = saved.parent() {
+                    fs::create_dir_all(parent).map_err(|error| {
+                        format!("cannot create apply backup directory: {error}")
+                    })?;
+                }
+                fs::copy(&target, &saved)
+                    .map_err(|error| format!("cannot back up {}: {error}", target.display()))?;
+                originals.push((relative.clone(), true));
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.kind() == std::io::ErrorKind::NotADirectory =>
             {
-                fs::remove_file(&target).map_err(|error| {
-                    format!("cannot replace symlink {}: {error}", target.display())
-                })?;
+                originals.push((relative.clone(), false));
             }
-            fs::copy(&source, &target).map_err(|error| {
-                format!(
-                    "cannot apply {} to {}: {error}",
-                    source.display(),
-                    target.display()
-                )
-            })?;
-            applied.push(AppliedChange::Updated(path.clone()));
-        } else if target.exists() {
-            fs::remove_file(&target)
-                .map_err(|error| format!("cannot remove {}: {error}", target.display()))?;
-            applied.push(AppliedChange::Deleted(path.clone()));
+            Err(error) => {
+                let _ = fs::remove_dir_all(&backup);
+                return Err(format!("cannot inspect {}: {error}", target.display()));
+            }
         }
     }
+
+    let mut applied = Vec::new();
+    for relative in &relatives {
+        match apply_one(original, executed, relative) {
+            Ok(change) => applied.push(change),
+            Err(error) => {
+                let rollback = restore_backup(original, &backup, &originals);
+                let _ = fs::remove_dir_all(&backup);
+                return Err(match rollback {
+                    Ok(()) => format!("{error}; all applied files were rolled back"),
+                    Err(rollback_error) => {
+                        format!("{error}; rollback also failed: {rollback_error}")
+                    }
+                });
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(&backup);
     Ok(applied)
+}
+
+fn apply_one(original: &Path, executed: &Path, relative: &Path) -> Result<AppliedChange, String> {
+    let source = executed.join(relative);
+    let target = original.join(relative);
+    let source_metadata = fs::symlink_metadata(&source).ok();
+    if source_metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+    {
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+        fs::copy(&source, &target).map_err(|error| {
+            format!(
+                "cannot apply {} to {}: {error}",
+                source.display(),
+                target.display()
+            )
+        })?;
+        Ok(AppliedChange::Updated(
+            relative.to_string_lossy().replace('\\', "/"),
+        ))
+    } else if target.exists() {
+        fs::remove_file(&target)
+            .map_err(|error| format!("cannot remove {}: {error}", target.display()))?;
+        Ok(AppliedChange::Deleted(
+            relative.to_string_lossy().replace('\\', "/"),
+        ))
+    } else {
+        Ok(AppliedChange::Updated(
+            relative.to_string_lossy().replace('\\', "/"),
+        ))
+    }
+}
+
+fn restore_backup(
+    original: &Path,
+    backup: &Path,
+    originals: &[(PathBuf, bool)],
+) -> Result<(), String> {
+    for (relative, existed) in originals {
+        let target = original.join(relative);
+        if *existed {
+            let saved = backup.join(relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("cannot recreate {}: {error}", parent.display()))?;
+            }
+            fs::copy(&saved, &target)
+                .map_err(|error| format!("cannot restore {}: {error}", target.display()))?;
+        } else {
+            match fs::remove_file(&target) {
+                Ok(()) => {}
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        || error.kind() == std::io::ErrorKind::NotADirectory => {}
+                Err(error) => {
+                    return Err(format!("cannot remove {}: {error}", target.display()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn backup_directory() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "harness-apply-backup-{}-{nanos}",
+        std::process::id()
+    ))
 }
 
 #[cfg(test)]
@@ -198,6 +304,31 @@ mod tests {
         assert!(!destination.join("target").exists());
         assert!(!destination.join(".git").exists());
         assert!(!destination.join("state").exists());
+    }
+
+    #[test]
+    fn failed_apply_rolls_back_files_already_copied() {
+        let original = unique_dir("apply-rollback-original");
+        let executed = unique_dir("apply-rollback-executed");
+        fs::write(original.join("keep.py"), "old\n").expect("antigo");
+        fs::write(executed.join("keep.py"), "new\n").expect("novo");
+        fs::write(original.join("blocked"), "not a directory\n").expect("bloqueio");
+        fs::create_dir_all(executed.join("blocked")).expect("dir no executado");
+        fs::write(executed.join("blocked/new.py"), "new\n").expect("novo arquivo");
+
+        let error = apply_changes(
+            &original,
+            &executed,
+            &["keep.py".into(), "blocked/new.py".into()],
+        )
+        .expect_err("aplicação deve falhar no segundo arquivo");
+
+        assert!(error.contains("rolled back"), "erro inesperado: {error}");
+        assert_eq!(
+            fs::read_to_string(original.join("keep.py")).expect("conteúdo"),
+            "old\n"
+        );
+        assert!(!original.join("blocked/new.py").exists());
     }
 
     #[test]

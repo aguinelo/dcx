@@ -1,9 +1,11 @@
 mod claude;
 mod codex;
 mod demo;
+mod events;
 mod interactive;
 mod providers;
 mod schemas;
+mod state;
 mod workspace;
 
 use harness_engine::RunState;
@@ -35,6 +37,12 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            Some("--job-02") if args.next().is_none() => {
+                if let Err(error) = demo::run_job02() {
+                    eprintln!("Falha no job-02: {error}");
+                    std::process::exit(1);
+                }
+            }
             Some("--request") => {
                 let request = args.collect::<Vec<_>>().join(" ");
                 if request.trim().is_empty() {
@@ -51,12 +59,24 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Some("state") => match args.next().as_deref() {
+            Some("prune") => {
+                if let Err(error) = state::run_prune(args) {
+                    eprintln!("Falha ao limpar o estado: {error}");
+                    std::process::exit(1);
+                }
+            }
+            _ => {
+                eprintln!("Uso: harness state prune --older-than-days <N> [--dry-run]");
+                std::process::exit(2);
+            }
+        },
         Some("--version" | "-V") if args.next().is_none() => {
             println!("harness {}", env!("CARGO_PKG_VERSION"));
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|--version|run --demo|--pilot|--request <pedido>>"
+                "Uso: harness <states|schemas --write|--check [DIR]|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
             );
             std::process::exit(2);
         }

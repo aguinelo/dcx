@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::events::EventLog;
 use crate::providers::{self, Analyst};
 use harness_artifacts::{
     Answer, ContractBundle, DeliveryReport, Plan, SCHEMA_VERSION, SensorImplementation, SensorLock,
@@ -57,6 +58,15 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         "\nContrato aprovado. Artefatos salvos em {}",
         artifact_dir.display()
     );
+    let mut events = EventLog::create(&artifact_dir, &run_id)?;
+    events.append(
+        "contract.approved",
+        serde_json::json!({
+            "criteria": approved_bundle.contract.criteria.len(),
+            "sensors": approved_bundle.sensor_suite.sensors.len(),
+            "revisions": revisions.len(),
+        }),
+    )?;
 
     let (implementation, sensor_dir) =
         author_sensors(&workspace, &approved_bundle, &understanding.locale, &run_id)?;
@@ -76,6 +86,13 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         "Fontes dos sensores (fora do workspace): {}",
         sensor_dir.display()
     );
+    events.append(
+        "sensors.locked",
+        serde_json::json!({
+            "suite_checksum": approved_bundle.sensor_suite.checksum()?,
+            "implementation_checksum": implementation.checksum()?,
+        }),
+    )?;
 
     lifecycle.transition(RunState::Planning)?;
     let mut planner = providers::planner()?;
@@ -92,6 +109,13 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         "\nPlano salvo em {}",
         artifact_dir.join("plan.json").display()
     );
+    events.append(
+        "plan.created",
+        serde_json::json!({
+            "steps": plan.steps.iter().map(|step| step.id.clone()).collect::<Vec<_>>(),
+            "integration_step_id": plan.integration_step_id,
+        }),
+    )?;
 
     let run_workspace = state_root().join("runs").join(&run_id).join("workspace");
     workspace::copy_project(&workspace, &run_workspace, &[state_root()])
@@ -104,7 +128,8 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         &approved_bundle.sensor_suite,
         &sensor_dir,
     )
-    .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?;
+    .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?
+    .sandbox_from_env()?;
     let lock = SensorLock::from_suite(&approved_bundle.sensor_suite)?;
     lock.verify(&approved_bundle.sensor_suite)?;
     let mut executor = providers::executor()?;
@@ -116,8 +141,14 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         &mut runner,
         executor.as_mut(),
         verifier.as_mut(),
+        &mut events,
     )?;
-    save_execution(&artifact_dir, &run_id, &execution)?;
+    save_execution(
+        &artifact_dir,
+        &run_id,
+        &execution,
+        approved_bundle.contract.criteria.len(),
+    )?;
     println!(
         "\nExecução concluída. Estado: {}",
         execution.states.last().unwrap()
@@ -136,6 +167,10 @@ pub fn run(request: &str) -> InteractiveResult<()> {
             .collect::<Vec<_>>();
         let applied = workspace::apply_changes(&workspace, &run_workspace, &changed)
             .map_err(|error| format!("Não foi possível aplicar as mudanças aprovadas: {error}"))?;
+        events.append(
+            "changes.applied",
+            serde_json::json!({"files": applied.len()}),
+        )?;
         println!(
             "{} arquivo(s) aplicados ao projeto após a aprovação.",
             applied.len()
@@ -143,6 +178,10 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         println!("Revise as mudanças no workspace e faça o merge.");
         Ok(())
     } else {
+        events.append(
+            "run.rejected",
+            serde_json::json!({"issues": execution.verdict.issues.len()}),
+        )?;
         println!(
             "A cópia com a execução reprovada foi preservada em {}",
             run_workspace.display()
@@ -158,15 +197,16 @@ fn execute_plan(
     runner: &mut ScriptSensorRunner,
     executor: &mut dyn Executor,
     verifier: &mut dyn Verifier,
+    events: &mut EventLog,
 ) -> InteractiveResult<RunExecution> {
     let coordinator = RunCoordinator::with_verification_limit(3, 3)?.stop_at_merge(true);
     let mut step_reports = Vec::new();
     let mut sensor_results = Vec::new();
     let mut states = Vec::new();
-    let mut verdict = None;
+    let mut verdict: Option<harness_artifacts::Verdict> = None;
     for step in plan.ordered_steps()? {
         let contract = bundle.contract.for_criteria(&step.criteria);
-        let suite = bundle.sensor_suite.for_criteria(&step.criteria);
+        let suite = bundle.sensor_suite.for_step(step);
         println!("Executando passo {}: {}", step.id, step.title);
         let execution = coordinator
             .execute_step(
@@ -183,11 +223,50 @@ fn execute_plan(
                 },
             )
             .map_err(std::io::Error::other)?;
+        let attempts = execution.step_reports.len();
+        let approved = execution.verdict.approved;
         step_reports.extend(execution.step_reports);
         sensor_results.extend(execution.sensor_results);
         states = execution.states;
-        let approved = execution.verdict.approved;
-        verdict = Some(execution.verdict);
+        events.append(
+            "step.completed",
+            serde_json::json!({
+                "step_id": step.id,
+                "approved": approved,
+                "attempts": attempts,
+            }),
+        )?;
+        let step_verdict = execution.verdict;
+        match verdict.as_mut() {
+            Some(combined) => {
+                combined.approved &= step_verdict.approved;
+                for criterion in step_verdict.criteria {
+                    if let Some(existing) = combined
+                        .criteria
+                        .iter_mut()
+                        .find(|existing| existing.criterion_id == criterion.criterion_id)
+                    {
+                        *existing = criterion;
+                    } else {
+                        combined.criteria.push(criterion);
+                    }
+                }
+                for issue in step_verdict.issues {
+                    if !combined.issues.iter().any(|existing| {
+                        existing.criterion_id == issue.criterion_id
+                            && existing.description == issue.description
+                    }) {
+                        combined.issues.push(issue);
+                    }
+                }
+                for note in step_verdict.notes {
+                    if !combined.notes.contains(&note) {
+                        combined.notes.push(note);
+                    }
+                }
+            }
+            None => verdict = Some(step_verdict),
+        }
         if !approved {
             break;
         }
@@ -204,6 +283,7 @@ fn save_execution(
     artifact_dir: &Path,
     run_id: &str,
     execution: &RunExecution,
+    criteria_total: usize,
 ) -> InteractiveResult<()> {
     let criteria_passed = execution
         .verdict
@@ -220,7 +300,7 @@ fn save_execution(
             "Execução reprovada; veja o veredito e as issues.".to_owned()
         },
         criteria_passed,
-        criteria_total: execution.verdict.criteria.len(),
+        criteria_total,
         sensor_results: execution.sensor_results.clone(),
         states: execution
             .states
@@ -371,7 +451,7 @@ fn new_run_id() -> String {
     format!("run-{}-{timestamp}", std::process::id())
 }
 
-fn state_root() -> PathBuf {
+pub(crate) fn state_root() -> PathBuf {
     if let Some(directory) = std::env::var_os("HARNESS_STATE_DIR") {
         return PathBuf::from(directory);
     }

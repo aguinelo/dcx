@@ -18,6 +18,13 @@ const MAX_EVIDENCE_CHARS: usize = 2000;
 /// `HARNESS_CRITERION_ID`. Exit code 0 means pass; any other exit code or a
 /// timeout means fail. The script must be self-contained and read only from the
 /// workspace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SandboxMode {
+    Off,
+    Auto,
+    Required,
+}
+
 pub struct ScriptSensorRunner {
     python: OsString,
     scripts: BTreeMap<String, PathBuf>,
@@ -25,6 +32,7 @@ pub struct ScriptSensorRunner {
     outputs: PathBuf,
     timeout: Duration,
     run_counter: u64,
+    sandbox: SandboxMode,
 }
 
 impl ScriptSensorRunner {
@@ -68,18 +76,42 @@ impl ScriptSensorRunner {
         }
 
         Ok(Self {
-            python: std::env::var_os("HARNESS_PYTHON").unwrap_or_else(|| "python3".into()),
+            python: resolve_python(),
             scripts,
             sources,
             outputs,
             timeout: Duration::from_secs(60),
             run_counter: 0,
+            sandbox: SandboxMode::Off,
         })
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
+    }
+
+    pub fn with_sandbox(mut self, sandbox: SandboxMode) -> Self {
+        self.sandbox = sandbox;
+        self
+    }
+
+    pub fn sandbox_from_env(mut self) -> Result<Self, String> {
+        self.sandbox = match std::env::var("HARNESS_SENSOR_SANDBOX")
+            .unwrap_or_else(|_| "off".to_owned())
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "off" => SandboxMode::Off,
+            "auto" => SandboxMode::Auto,
+            "required" => SandboxMode::Required,
+            other => {
+                return Err(format!(
+                    "HARNESS_SENSOR_SANDBOX inválido: {other}; use off, auto ou required"
+                ));
+            }
+        };
+        Ok(self)
     }
 
     pub fn script_path(&self, sensor_id: &str) -> Option<&Path> {
@@ -129,12 +161,26 @@ impl SensorRunner for ScriptSensorRunner {
         let stderr = fs::File::create(&stderr_path)
             .map_err(|error| format!("cannot capture sensor stderr: {error}"))?;
 
-        let mut child = Command::new(&self.python)
-            .arg(&script)
+        let mut command = sensor_command(&self.python, &script, workspace, self.sandbox)
+            .map_err(|error| format!("cannot prepare sensor {}: {error}", sensor.id))?;
+        let mut child = command
             .current_dir(workspace)
+            .env_clear()
             .env("HARNESS_WORKSPACE", workspace)
             .env("HARNESS_SENSOR_ID", &sensor.id)
             .env("HARNESS_CRITERION_ID", &sensor.criterion_id)
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("TMPDIR", std::env::var_os("TMPDIR").unwrap_or_default())
+            .env(
+                "LANG",
+                std::env::var_os("LANG").unwrap_or_else(|| "C.UTF-8".into()),
+            )
+            .env(
+                "LC_ALL",
+                std::env::var_os("LC_ALL").unwrap_or_else(|| "C.UTF-8".into()),
+            )
+            .env("PYTHONIOENCODING", "utf-8")
+            .env("HOME", &self.outputs)
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
@@ -190,6 +236,85 @@ impl SensorRunner for ScriptSensorRunner {
             evidence,
         })
     }
+}
+
+fn resolve_python() -> OsString {
+    if let Some(configured) = std::env::var_os("HARNESS_PYTHON") {
+        return configured;
+    }
+    if let Ok(output) = Command::new("python3")
+        .args(["-c", "import sys; print(sys.executable)"])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !path.is_empty() {
+                return path.into();
+            }
+        }
+    }
+    "python3".into()
+}
+
+fn sensor_command(
+    python: &OsString,
+    script: &Path,
+    workspace: &Path,
+    sandbox: SandboxMode,
+) -> Result<Command, String> {
+    if sandbox == SandboxMode::Off {
+        return Ok({
+            let mut command = Command::new(python);
+            command.arg(script);
+            command
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if sandbox_exec_available() {
+            let profile = sandbox_profile(workspace)?;
+            let mut command = Command::new("sandbox-exec");
+            command.arg("-p").arg(profile).arg(python).arg(script);
+            return Ok(command);
+        }
+        if sandbox == SandboxMode::Required {
+            return Err("sandbox-exec não está disponível".to_owned());
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    if sandbox == SandboxMode::Required {
+        return Err("sandbox de sensores não implementado nesta plataforma".to_owned());
+    }
+    Ok({
+        let mut command = Command::new(python);
+        command.arg(script);
+        command
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn sandbox_exec_available() -> bool {
+    std::process::Command::new("sandbox-exec")
+        .arg("-h")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+}
+
+#[cfg(target_os = "macos")]
+fn sandbox_profile(workspace: &Path) -> Result<String, String> {
+    let workspace = fs::canonicalize(workspace)
+        .map_err(|error| format!("cannot resolve sensor workspace: {error}"))?;
+    let workspace = escape_profile_path(&workspace.to_string_lossy());
+    Ok(format!(
+        "(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n(allow file-write* (subpath \"{workspace}\") (subpath \"/private/tmp\") (subpath \"/tmp\") (subpath \"/dev\"))\n"
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn escape_profile_path(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn safe_name(value: &str) -> String {
@@ -316,6 +441,15 @@ mod tests {
         );
         assert!(!result.passed);
         assert!(result.evidence.contains("timed out"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn sandbox_profile_denies_network_and_writes_outside_workspace() {
+        let profile = sandbox_profile(Path::new("/tmp")).expect("profile");
+        assert!(profile.contains("(deny network*)"));
+        assert!(profile.contains("(deny file-write*)"));
+        assert!(profile.contains("(allow file-write*"));
     }
 
     #[test]

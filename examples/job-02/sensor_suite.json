@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "sensors": [
+    {
+      "id": "visible-slug",
+      "criterion_id": "slug-basic",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "visible",
+      "purpose": "acceptance",
+      "check": "Hello World -> hello-world"
+    },
+    {
+      "id": "visible-unicode",
+      "criterion_id": "slug-unicode",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "visible",
+      "purpose": "acceptance",
+      "check": "Café com Leite -> cafe-com-leite"
+    },
+    {
+      "id": "visible-empty",
+      "criterion_id": "slug-empty",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "visible",
+      "purpose": "acceptance",
+      "check": "!!! -> linha vazia"
+    },
+    {
+      "id": "hidden-unicode",
+      "criterion_id": "slug-unicode",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "hidden",
+      "purpose": "acceptance",
+      "check": "Ação & Reação -> acao-reacao"
+    },
+    {
+      "id": "hidden-separators",
+      "criterion_id": "slug-basic",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "hidden",
+      "purpose": "acceptance",
+      "check": "  Foo__Bar  -> foo-bar"
+    }
+  ]
+}

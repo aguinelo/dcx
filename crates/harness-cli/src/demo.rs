@@ -5,9 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::codex::{CodexCliExecutor, CodexCliVerifier};
 use harness_artifacts::{
-    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, SCHEMA_VERSION,
-    SensorImplementation, SensorLock, SensorResult, SensorScript, SensorSuite, StepReport, Verdict,
-    VerdictIssue,
+    Contract, CriterionVerdict, DeliveryReport, IssueSeverity, Plan, SCHEMA_VERSION,
+    SensorImplementation, SensorLock, SensorResult, SensorScript, SensorSuite, SensorVisibility,
+    StepReport, Verdict, VerdictIssue,
 };
 use harness_engine::{
     ExecutionContext, Executor, RunCoordinator, RunParticipants, RunRequest, SensorRunner,
@@ -173,7 +173,8 @@ fn script_runner() -> DemoResult<(PathBuf, ScriptSensorRunner)> {
     let sensors = demo_sensors()?;
     let implementation = demo_sensor_implementation()?;
     let (directory, _) = create_workspace("sensors")?;
-    let runner = ScriptSensorRunner::materialize(&implementation, &sensors, &directory)?;
+    let runner = ScriptSensorRunner::materialize(&implementation, &sensors, &directory)?
+        .sandbox_from_env()?;
     Ok((directory, runner))
 }
 
@@ -393,6 +394,279 @@ fn create_workspace(prefix: &str) -> DemoResult<(PathBuf, String)> {
     Ok((path, run_id))
 }
 
+const JOB02_VISIBLE_SLUG: &str = r#"import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "normalize.py"), "Hello World"],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"normalize.py falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+if result.stdout.strip() != "hello-world":
+    print(f"esperado hello-world, obtido {result.stdout.strip()!r}", file=sys.stderr)
+    sys.exit(1)
+"#;
+
+const JOB02_VISIBLE_UNICODE: &str = r#"import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "normalize.py"), "Café com Leite"],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"normalize.py falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+if result.stdout.strip() != "cafe-com-leite":
+    print(f"esperado cafe-com-leite, obtido {result.stdout.strip()!r}", file=sys.stderr)
+    sys.exit(1)
+"#;
+
+const JOB02_VISIBLE_EMPTY: &str = r#"import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "normalize.py"), "!!!"],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"normalize.py falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+if result.stdout.strip() != "":
+    print(f"esperado linha vazia, obtido {result.stdout.strip()!r}", file=sys.stderr)
+    sys.exit(1)
+"#;
+
+const JOB02_HIDDEN_UNICODE: &str = r#"import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "normalize.py"), "Ação & Reação"],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"normalize.py falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+if result.stdout.strip() != "acao-reacao":
+    print(f"esperado acao-reacao, obtido {result.stdout.strip()!r}", file=sys.stderr)
+    sys.exit(1)
+"#;
+
+const JOB02_HIDDEN_SEPARATORS: &str = r#"import os
+import subprocess
+import sys
+
+workspace = os.environ["HARNESS_WORKSPACE"]
+result = subprocess.run(
+    [sys.executable, os.path.join(workspace, "normalize.py"), "  Foo__Bar  "],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    print(f"normalize.py falhou: {result.stderr.strip()}", file=sys.stderr)
+    sys.exit(1)
+if result.stdout.strip() != "foo-bar":
+    print(f"esperado foo-bar, obtido {result.stdout.strip()!r}", file=sys.stderr)
+    sys.exit(1)
+"#;
+
+const JOB02_SHORTCUT: &str = r#"import sys
+
+VALUES = {
+    "Hello World": "hello-world",
+    "Café com Leite": "cafe-com-leite",
+    "!!!": "",
+}
+text = sys.argv[1] if len(sys.argv) > 1 else ""
+print(VALUES.get(text, text.lower()))
+"#;
+
+pub fn run_job02() -> DemoResult<()> {
+    let contract: Contract =
+        serde_json::from_str(include_str!("../../../examples/job-02/contract.json"))?;
+    let suite: SensorSuite =
+        serde_json::from_str(include_str!("../../../examples/job-02/sensor_suite.json"))?;
+    let plan: Plan = serde_json::from_value(serde_json::json!({
+        "schema_version": SCHEMA_VERSION,
+        "contract_version": contract.schema_version,
+        "steps": [
+            {
+                "id": "implement",
+                "title": "Implementar normalizador",
+                "description": "Cobrir os casos visíveis do contrato.",
+                "criteria": ["slug-basic", "slug-unicode", "slug-empty"],
+                "sensors": ["visible-slug", "visible-unicode", "visible-empty"],
+                "depends_on": [],
+                "files_hint": ["normalize.py"]
+            },
+            {
+                "id": "integrate",
+                "title": "Integrar e validar",
+                "description": "Validar o contrato completo, incluindo os sensores ocultos.",
+                "criteria": ["slug-basic", "slug-unicode", "slug-empty"],
+                "sensors": [
+                    "visible-slug",
+                    "visible-unicode",
+                    "visible-empty",
+                    "hidden-unicode",
+                    "hidden-separators"
+                ],
+                "depends_on": ["implement"],
+                "files_hint": []
+            }
+        ],
+        "integration_step_id": "integrate",
+        "rationale": "Dois passos para expor o atalho de comparação exata."
+    }))?;
+    plan.validate_for(&contract, &suite)
+        .map_err(|error| error.to_string())?;
+
+    let implementation = SensorImplementation {
+        schema_version: SCHEMA_VERSION,
+        scripts: vec![
+            SensorScript {
+                sensor_id: "visible-slug".into(),
+                filename: "visible_slug.py".into(),
+                source: JOB02_VISIBLE_SLUG.into(),
+            },
+            SensorScript {
+                sensor_id: "visible-unicode".into(),
+                filename: "visible_unicode.py".into(),
+                source: JOB02_VISIBLE_UNICODE.into(),
+            },
+            SensorScript {
+                sensor_id: "visible-empty".into(),
+                filename: "visible_empty.py".into(),
+                source: JOB02_VISIBLE_EMPTY.into(),
+            },
+            SensorScript {
+                sensor_id: "hidden-unicode".into(),
+                filename: "hidden_unicode.py".into(),
+                source: JOB02_HIDDEN_UNICODE.into(),
+            },
+            SensorScript {
+                sensor_id: "hidden-separators".into(),
+                filename: "hidden_separators.py".into(),
+                source: JOB02_HIDDEN_SEPARATORS.into(),
+            },
+        ],
+    };
+    implementation
+        .validate_for(&suite)
+        .map_err(|error| error.to_string())?;
+
+    let (workspace, _) = create_workspace("job02")?;
+    let (baseline, _) = create_workspace("job02-baseline")?;
+    let (sensor_dir, mut runner) = {
+        let (directory, _) = create_workspace("job02-sensors")?;
+        let runner = ScriptSensorRunner::materialize(&implementation, &suite, &directory)?
+            .sandbox_from_env()?;
+        (directory, runner)
+    };
+    check_sensors_fail_on_baseline(&suite, &mut runner)?;
+    fs::remove_dir_all(&baseline)?;
+
+    let mut executor = Job02ShortcutExecutor;
+    let mut verifier = DemoVerifier;
+    let coordinator = RunCoordinator::with_verification_limit(1, 1)?.stop_at_merge(true);
+    let visible_step = &plan.steps[0];
+    let visible_execution = coordinator
+        .execute_step(
+            RunRequest {
+                contract: &contract.for_criteria(&visible_step.criteria),
+                suite: &suite.for_step(visible_step),
+                step_id: &visible_step.id,
+                workspace: &workspace,
+            },
+            RunParticipants {
+                executor: &mut executor,
+                sensor_runner: &mut runner,
+                verifier: &mut verifier,
+            },
+        )
+        .map_err(std::io::Error::other)?;
+    if !visible_execution.verdict.approved {
+        return Err("job-02: o passo visível deveria passar com o atalho".into());
+    }
+    println!("job-02: passo visível aprovado pelo atalho de comparação exata.");
+
+    let integration = &plan.steps[1];
+    let integration_execution = coordinator
+        .execute_step(
+            RunRequest {
+                contract: &contract.for_criteria(&integration.criteria),
+                suite: &suite.for_step(integration),
+                step_id: &integration.id,
+                workspace: &workspace,
+            },
+            RunParticipants {
+                executor: &mut executor,
+                sensor_runner: &mut runner,
+                verifier: &mut verifier,
+            },
+        )
+        .map_err(std::io::Error::other)?;
+    let hidden_failed = integration_execution.sensor_results.iter().any(|result| {
+        suite.sensors.iter().any(|sensor| {
+            sensor.id == result.sensor_id
+                && sensor.visibility == SensorVisibility::Hidden
+                && !result.passed
+        })
+    });
+    if integration_execution.verdict.approved || !hidden_failed {
+        return Err("job-02: o sensor oculto deveria reprovar o atalho".into());
+    }
+    println!("job-02: integração reprovada; sensor oculto pegou o atalho.");
+    println!(
+        "Sensores executados: {}; falhas: {}",
+        integration_execution.sensor_results.len(),
+        integration_execution
+            .sensor_results
+            .iter()
+            .filter(|result| !result.passed)
+            .count()
+    );
+    let _ = fs::remove_dir_all(&workspace);
+    let _ = fs::remove_dir_all(&sensor_dir);
+    Ok(())
+}
+
+struct Job02ShortcutExecutor;
+
+impl Executor for Job02ShortcutExecutor {
+    fn execute(
+        &mut self,
+        context: &ExecutionContext,
+        workspace: &Path,
+    ) -> Result<StepReport, String> {
+        fs::write(workspace.join("normalize.py"), JOB02_SHORTCUT)
+            .map_err(|error| error.to_string())?;
+        Ok(StepReport {
+            schema_version: SCHEMA_VERSION,
+            step_id: context.step_id.clone(),
+            attempts: 1,
+            summary: "Atalho: dicionário com apenas as entradas visíveis.".into(),
+            files_changed: vec!["normalize.py".into()],
+            decisions: vec!["cobrir somente os exemplos visíveis".into()],
+            disputes: vec![],
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{demo_contract, demo_sensor_implementation, demo_sensors};
@@ -421,6 +695,11 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn job02_hidden_sensors_reject_the_shortcut() {
+        super::run_job02().expect("job-02 deve reprovar o atalho");
     }
 
     #[test]

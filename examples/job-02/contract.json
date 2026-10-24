@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "objective": "Implementar slugify(text) que normaliza nomes para minúsculas, sem acentos e com hífens simples.",
+  "assumptions": [
+    "A interface é `python normalize.py <texto>` e imprime o slug em uma linha."
+  ],
+  "criteria": [
+    {
+      "id": "slug-basic",
+      "description": "Texto comum vira slug minúsculo separado por hífens simples."
+    },
+    {
+      "id": "slug-unicode",
+      "description": "Acentos e pontuação são convertidos sem perder letras."
+    },
+    {
+      "id": "slug-empty",
+      "description": "Entrada sem letras ou dígitos produz uma linha vazia."
+    }
+  ],
+  "interface": {
+    "command": "python normalize.py <texto>",
+    "stdout": "slug em uma linha"
+  },
+  "constraints": [
+    "Não alterar os sensores.",
+    "Não usar rede."
+  ],
+  "out_of_scope": [
+    "Nomes de arquivos",
+    "Tradução"
+  ]
+}
