@@ -96,6 +96,7 @@ pub struct RunParticipants<'a> {
 pub struct RunCoordinator {
     max_attempts: u32,
     max_verifications: u32,
+    stop_at_merge: bool,
 }
 
 impl RunCoordinator {
@@ -116,7 +117,14 @@ impl RunCoordinator {
         Ok(Self {
             max_attempts,
             max_verifications,
+            stop_at_merge: false,
         })
+    }
+
+    /// Stops at `awaiting_merge` so a human can review and merge the change.
+    pub fn stop_at_merge(mut self, stop: bool) -> Self {
+        self.stop_at_merge = stop;
+        self
     }
 
     pub fn execute(
@@ -304,9 +312,11 @@ impl RunCoordinator {
                 lifecycle
                     .transition(RunState::AwaitingMerge)
                     .map_err(|error| error.to_string())?;
-                lifecycle
-                    .transition(RunState::Done)
-                    .map_err(|error| error.to_string())?;
+                if !self.stop_at_merge {
+                    lifecycle
+                        .transition(RunState::Done)
+                        .map_err(|error| error.to_string())?;
+                }
                 return Ok(RunExecution {
                     step_reports,
                     sensor_results,
@@ -1217,5 +1227,67 @@ mod tests {
         assert!(!executor.feedback[1].is_empty());
         assert_eq!(sensor_runner.visible_runs, 2);
         assert_eq!(sensor_runner.hidden_runs, 1);
+    }
+
+    #[test]
+    fn coordinator_can_stop_at_merge_gate() {
+        let contract = Contract {
+            schema_version: SCHEMA_VERSION,
+            objective: "objective".into(),
+            assumptions: vec![],
+            criteria: vec![Criterion {
+                id: "criterion".into(),
+                description: "observable".into(),
+            }],
+            interface: serde_json::Value::Null,
+            constraints: vec![],
+            out_of_scope: vec![],
+        };
+        let suite = SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![
+                SensorSpec {
+                    id: "visible".into(),
+                    criterion_id: "criterion".into(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: SensorVisibility::Visible,
+                    purpose: "acceptance".into(),
+                    check: "visible check".into(),
+                },
+                SensorSpec {
+                    id: "hidden".into(),
+                    criterion_id: "criterion".into(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: SensorVisibility::Hidden,
+                    purpose: "acceptance".into(),
+                    check: "hidden check".into(),
+                },
+            ],
+        };
+        let mut executor = CountingExecutor::default();
+        let mut sensor_runner = RetrySensorRunner::default();
+        let mut verifier = AlwaysApproveVerifier;
+        let execution = RunCoordinator::new(2)
+            .expect("valid coordinator")
+            .stop_at_merge(true)
+            .execute(
+                RunRequest {
+                    contract: &contract,
+                    suite: &suite,
+                    step_id: "step-1",
+                    workspace: Path::new("."),
+                },
+                RunParticipants {
+                    executor: &mut executor,
+                    sensor_runner: &mut sensor_runner,
+                    verifier: &mut verifier,
+                },
+            )
+            .expect("run succeeds after retry");
+
+        assert!(execution.verdict.approved);
+        assert_eq!(execution.states.last(), Some(&RunState::AwaitingMerge));
     }
 }

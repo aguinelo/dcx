@@ -563,6 +563,203 @@ pub struct Plan {
     pub rationale: String,
 }
 
+impl Plan {
+    pub fn validate_for(
+        &self,
+        contract: &Contract,
+        suite: &SensorSuite,
+    ) -> Result<(), ValidationError> {
+        contract.validate()?;
+        suite.validate_for(contract)?;
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(ValidationError::new("unsupported plan schema_version"));
+        }
+        if self.contract_version != contract.schema_version {
+            return Err(ValidationError::new(
+                "plan contract_version does not match the contract",
+            ));
+        }
+        if self.steps.is_empty() {
+            return Err(ValidationError::new("plan must contain at least one step"));
+        }
+        unique_non_empty(
+            self.steps.iter().map(|step| step.id.as_str()),
+            "plan step id",
+        )?;
+        if !self
+            .steps
+            .iter()
+            .any(|step| step.id == self.integration_step_id)
+        {
+            return Err(ValidationError::new(
+                "plan integration_step_id does not name a step",
+            ));
+        }
+
+        let step_ids = self
+            .steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        for step in &self.steps {
+            if step.title.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "plan step {} title must not be empty",
+                    step.id
+                )));
+            }
+            if step.description.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "plan step {} description must not be empty",
+                    step.id
+                )));
+            }
+            if step.criteria.is_empty() {
+                return Err(ValidationError::new(format!(
+                    "plan step {} must cover at least one criterion",
+                    step.id
+                )));
+            }
+            unique_non_empty(
+                step.criteria.iter().map(String::as_str),
+                "step criterion id",
+            )?;
+            unique_non_empty(step.sensors.iter().map(String::as_str), "step sensor id")?;
+            unique_non_empty(
+                step.depends_on.iter().map(String::as_str),
+                "step dependency",
+            )?;
+            for criterion_id in &step.criteria {
+                if !contract
+                    .criteria
+                    .iter()
+                    .any(|criterion| &criterion.id == criterion_id)
+                {
+                    return Err(ValidationError::new(format!(
+                        "plan step {} references unknown criterion {}",
+                        step.id, criterion_id
+                    )));
+                }
+            }
+            for sensor_id in &step.sensors {
+                let Some(sensor) = suite.sensors.iter().find(|sensor| &sensor.id == sensor_id)
+                else {
+                    return Err(ValidationError::new(format!(
+                        "plan step {} references unknown sensor {}",
+                        step.id, sensor_id
+                    )));
+                };
+                if !step.criteria.iter().any(|id| id == &sensor.criterion_id) {
+                    return Err(ValidationError::new(format!(
+                        "plan step {} includes sensor {} outside its criteria",
+                        step.id, sensor_id
+                    )));
+                }
+            }
+            for dependency in &step.depends_on {
+                if dependency == &step.id {
+                    return Err(ValidationError::new(format!(
+                        "plan step {} depends on itself",
+                        step.id
+                    )));
+                }
+                if !step_ids.contains(dependency.as_str()) {
+                    return Err(ValidationError::new(format!(
+                        "plan step {} depends on unknown step {}",
+                        step.id, dependency
+                    )));
+                }
+            }
+        }
+
+        for criterion in &contract.criteria {
+            if !self
+                .steps
+                .iter()
+                .any(|step| step.criteria.iter().any(|id| id == &criterion.id))
+            {
+                return Err(ValidationError::new(format!(
+                    "criterion {} is not covered by any plan step",
+                    criterion.id
+                )));
+            }
+        }
+        for sensor in &suite.sensors {
+            if !self
+                .steps
+                .iter()
+                .any(|step| step.sensors.iter().any(|id| id == &sensor.id))
+            {
+                return Err(ValidationError::new(format!(
+                    "sensor {} is not assigned to any plan step",
+                    sensor.id
+                )));
+            }
+        }
+
+        let integration = self
+            .steps
+            .iter()
+            .find(|step| step.id == self.integration_step_id)
+            .expect("integration step exists");
+        for criterion in &contract.criteria {
+            if !integration.criteria.iter().any(|id| id == &criterion.id) {
+                return Err(ValidationError::new(format!(
+                    "integration step does not cover criterion {}",
+                    criterion.id
+                )));
+            }
+        }
+        for sensor in &suite.sensors {
+            if !integration.sensors.iter().any(|id| id == &sensor.id) {
+                return Err(ValidationError::new(format!(
+                    "integration step does not include sensor {}",
+                    sensor.id
+                )));
+            }
+        }
+
+        self.check_acyclic()
+    }
+
+    fn check_acyclic(&self) -> Result<(), ValidationError> {
+        fn visit<'a>(
+            id: &'a str,
+            steps: &'a std::collections::HashMap<&'a str, &'a PlanStep>,
+            visiting: &mut std::collections::HashSet<&'a str>,
+            visited: &mut std::collections::HashSet<&'a str>,
+        ) -> Result<(), ValidationError> {
+            if visited.contains(id) {
+                return Ok(());
+            }
+            if !visiting.insert(id) {
+                return Err(ValidationError::new(format!(
+                    "plan dependency cycle includes step {id}"
+                )));
+            }
+            let step = steps[id];
+            for dependency in &step.depends_on {
+                visit(dependency, steps, visiting, visited)?;
+            }
+            visiting.remove(id);
+            visited.insert(id);
+            Ok(())
+        }
+
+        let steps = self
+            .steps
+            .iter()
+            .map(|step| (step.id.as_str(), step))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut visiting = std::collections::HashSet::new();
+        let mut visited = std::collections::HashSet::new();
+        for step in &self.steps {
+            visit(&step.id, &steps, &mut visiting, &mut visited)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct StepReport {
     pub schema_version: u32,
@@ -997,6 +1194,78 @@ mod tests {
         };
         assert!(answered.validate().is_ok());
         assert!(answered.unanswered_blocking_questions().is_empty());
+    }
+
+    fn plan() -> Plan {
+        Plan {
+            schema_version: SCHEMA_VERSION,
+            contract_version: SCHEMA_VERSION,
+            steps: vec![PlanStep {
+                id: "convert".into(),
+                title: "Implementar conversor".into(),
+                description: "Criar o conversor e o comando".into(),
+                criteria: vec!["records".into()],
+                sensors: vec!["records-sensor".into(), "hidden-records-sensor".into()],
+                depends_on: vec![],
+                files_hint: vec!["convert.py".into()],
+            }],
+            integration_step_id: "convert".into(),
+            rationale: "Uma única entrega cobre o contrato.".into(),
+        }
+    }
+
+    fn suite() -> SensorSuite {
+        SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors: vec![
+                sensor(SensorVisibility::Visible),
+                SensorSpec {
+                    id: "hidden-records-sensor".into(),
+                    visibility: SensorVisibility::Hidden,
+                    ..sensor(SensorVisibility::Visible)
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn plan_accepts_covered_contract_and_suite() {
+        assert!(plan().validate_for(&contract(), &suite()).is_ok());
+    }
+
+    #[test]
+    fn plan_requires_every_criterion_and_sensor() {
+        let mut missing_criterion = plan();
+        missing_criterion.steps[0].criteria.clear();
+        assert!(
+            missing_criterion
+                .validate_for(&contract(), &suite())
+                .is_err()
+        );
+
+        let mut missing_sensor = plan();
+        missing_sensor.steps[0].sensors.pop();
+        assert!(missing_sensor.validate_for(&contract(), &suite()).is_err());
+    }
+
+    #[test]
+    fn plan_rejects_unknown_sensor_and_cycles() {
+        let mut unknown = plan();
+        unknown.steps[0].sensors.push("other".into());
+        assert!(unknown.validate_for(&contract(), &suite()).is_err());
+
+        let mut cyclic = plan();
+        cyclic.steps.push(PlanStep {
+            id: "second".into(),
+            title: "Segundo passo".into(),
+            description: "Depende do primeiro".into(),
+            criteria: vec!["records".into()],
+            sensors: vec!["records-sensor".into()],
+            depends_on: vec!["convert".into()],
+            files_hint: vec![],
+        });
+        cyclic.steps[0].depends_on.push("second".into());
+        assert!(cyclic.validate_for(&contract(), &suite()).is_err());
     }
 
     fn assert_closed_objects(value: &serde_json::Value) {

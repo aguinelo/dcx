@@ -90,6 +90,7 @@ fn write_fake_codex(dir: &Path, contracts: &[&str]) -> PathBuf {
         .join(",\n");
     let script = r#"#!/usr/bin/env python3
 import json
+import os
 import sys
 
 UNDERSTANDING = __UNDERSTANDING__
@@ -99,10 +100,13 @@ __CONTRACTS__
 COUNTER = __COUNTER__
 
 schema = ""
+workspace = ""
 args = sys.argv[1:]
 for index, arg in enumerate(args):
     if arg == "--output-schema" and index + 1 < len(args):
         schema = args[index + 1]
+    if arg == "--cd" and index + 1 < len(args):
+        workspace = args[index + 1]
 prompt = sys.stdin.read()
 
 if schema.endswith("understanding.schema.json"):
@@ -128,9 +132,59 @@ elif schema.endswith("sensor_implementation.schema.json"):
         scripts.append({
             "sensor_id": sensor["id"],
             "filename": sensor["id"].replace("-", "_") + ".py",
-            "source": "import sys\nprint('not implemented')\nsys.exit(1)\n",
+            "source": "import os\nimport sys\nworkspace = os.environ['HARNESS_WORKSPACE']\nif not os.path.exists(os.path.join(workspace, 'implemented.txt')):\n    print('not implemented')\n    sys.exit(1)\nprint('implemented')\n",
         })
     print(json.dumps({"schema_version": 1, "scripts": scripts}))
+elif schema.endswith("plan.schema.json"):
+    marker = "Contrato aprovado e suíte de sensores:\n"
+    start = prompt.index(marker) + len(marker)
+    end = prompt.index("\n\nRetorne apenas um plan", start)
+    bundle = json.loads(prompt[start:end])
+    criteria = [criterion["id"] for criterion in bundle["contract"]["criteria"]]
+    sensors = [sensor["id"] for sensor in bundle["sensor_suite"]["sensors"]]
+    print(json.dumps({
+        "schema_version": 1,
+        "contract_version": bundle["contract"]["schema_version"],
+        "steps": [{
+            "id": "integration",
+            "title": "Implementar e validar",
+            "description": "Entregar o contrato em um passo.",
+            "criteria": criteria,
+            "sensors": sensors,
+            "depends_on": [],
+            "files_hint": ["implemented.txt"],
+        }],
+        "integration_step_id": "integration",
+        "rationale": "Tarefa pequena em um passo.",
+    }))
+elif schema.endswith("step_report.schema.json"):
+    marker = "O campo step_id do step_report deve ser exatamente: "
+    step_id = prompt.split(marker)[1].split(".")[0]
+    with open(os.path.join(workspace, "implemented.txt"), "w", encoding="utf-8") as handle:
+        handle.write("done\n")
+    print(json.dumps({
+        "schema_version": 1,
+        "step_id": step_id,
+        "attempts": 1,
+        "summary": "Implementação criada.",
+        "files_changed": [],
+        "decisions": [],
+        "disputes": [],
+    }))
+elif schema.endswith("verdict.schema.json"):
+    start = prompt.index("Contrato:\n") + len("Contrato:\n")
+    end = prompt.index("\nSuíte de sensores", start)
+    contract = json.loads(prompt[start:end])
+    print(json.dumps({
+        "schema_version": 1,
+        "approved": True,
+        "criteria": [
+            {"criterion_id": criterion["id"], "passed": True, "evidence": ["implemented"]}
+            for criterion in contract["criteria"]
+        ],
+        "issues": [],
+        "notes": [],
+    }))
 else:
     sys.exit(3)
 "#
@@ -195,7 +249,8 @@ fn blocking_question_is_answered_before_contract_approval() {
     assert!(stdout.contains("Pergunta bloqueante: Organizar por tipo ou por data?"));
     assert!(stdout.contains("Contrato aprovado"));
     assert!(stdout.contains("Sensores de aceite implementados"));
-    assert!(stdout.contains("acceptance_authoring"));
+    assert!(stdout.contains("Execução concluída. Estado: awaiting_merge"));
+    assert!(stdout.contains("Revise as mudanças"));
 
     let run = single_run_dir(&project);
     let understanding: serde_json::Value =
@@ -214,6 +269,10 @@ fn blocking_question_is_answered_before_contract_approval() {
         serde_json::from_slice(&fs::read(run.join("run.json")).expect("run")).expect("JSON válido");
     let states = state["states"].as_array().expect("estados");
     assert!(states.iter().any(|state| state == "awaiting_human"));
+    assert_eq!(
+        states.last().and_then(|state| state.as_str()),
+        Some("awaiting_merge")
+    );
 
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(run.join("sensor_manifest.json")).expect("manifesto"))
@@ -229,6 +288,14 @@ fn blocking_question_is_answered_before_contract_approval() {
     let sensors = state_dir.join("runs").join(&run_id).join("sensors");
     assert!(sensors.join("visible_organize_by_type.py").is_file());
     assert!(sensors.join("hidden_organize_by_type.py").is_file());
+
+    assert!(run.join("plan.json").is_file());
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("verdict.json")).expect("veredito"))
+            .expect("veredito JSON");
+    assert_eq!(verdict["approved"], true);
+    assert_eq!(verdict["criteria"].as_array().expect("critérios").len(), 1);
+    assert!(run.join("delivery_report.json").is_file());
 }
 
 #[test]
@@ -298,4 +365,9 @@ fn rejected_contract_keeps_previous_wording_and_revises() {
             .iter()
             .any(|script| script["sensor_id"] == "visible-organize-by-type-v2")
     );
+
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("verdict.json")).expect("veredito"))
+            .expect("veredito JSON");
+    assert_eq!(verdict["approved"], true);
 }

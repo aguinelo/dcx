@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_artifacts::{
-    Contract, ContractBundle, SensorImplementation, SensorResult, SensorSuite, StepReport,
+    Contract, ContractBundle, Plan, SensorImplementation, SensorResult, SensorSuite, StepReport,
     Understanding, Verdict, json_schemas,
 };
 use harness_engine::{ExecutionContext, Executor, Verifier};
@@ -125,6 +125,46 @@ impl CodexCliAcceptanceAuthor {
             "read-only",
             workspace,
             "sensor_implementation.schema.json",
+            &prompt,
+        )
+    }
+}
+
+pub struct CodexCliPlanner {
+    binary: OsString,
+    model: Option<String>,
+}
+
+impl Default for CodexCliPlanner {
+    fn default() -> Self {
+        Self {
+            binary: std::env::var_os("HARNESS_CODEX_BIN").unwrap_or_else(|| "codex".into()),
+            model: std::env::var("HARNESS_PLANNER_MODEL")
+                .ok()
+                .or_else(|| std::env::var("HARNESS_CODEX_MODEL").ok()),
+        }
+    }
+}
+
+impl CodexCliPlanner {
+    pub fn plan(
+        &mut self,
+        workspace: &Path,
+        bundle: &ContractBundle,
+        locale: &str,
+    ) -> Result<Plan, String> {
+        let role = include_str!("../../../prompts/planner.md").replace("{{locale}}", locale);
+        let prompt = format!(
+            "{role}\n\nContexto desta execução:\n- Locale: {locale}\n- Projeto: {}\n- O workspace deve ser lido sem alterações. Não acesse a rede.\n\nContrato aprovado e suíte de sensores:\n{}\n\nRetorne apenas um plan JSON válido que cubra todos os critérios e atribua todos os sensores.",
+            workspace.display(),
+            serde_json::to_string_pretty(bundle).map_err(|error| error.to_string())?,
+        );
+        invoke_codex(
+            &self.binary,
+            self.model.as_deref(),
+            "read-only",
+            workspace,
+            "plan.schema.json",
             &prompt,
         )
     }

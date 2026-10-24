@@ -50,6 +50,16 @@ impl ScriptSensorRunner {
         let mut sources = BTreeMap::new();
         for script in &implementation.scripts {
             let path = directory.join(&script.filename);
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "cannot replace sensor {}: {error}",
+                        script.sensor_id
+                    ));
+                }
+            }
             fs::write(&path, &script.source)
                 .map_err(|error| format!("cannot write sensor {}: {error}", script.sensor_id))?;
             make_read_only(&path)?;

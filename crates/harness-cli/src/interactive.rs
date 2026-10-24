@@ -4,12 +4,17 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::codex::{CodexCliAcceptanceAuthor, CodexCliAnalyst};
-use harness_artifacts::{
-    Answer, ContractBundle, SCHEMA_VERSION, SensorImplementation, SensorLock, SensorVisibility,
-    Understanding,
+use crate::codex::{
+    CodexCliAcceptanceAuthor, CodexCliAnalyst, CodexCliExecutor, CodexCliPlanner, CodexCliVerifier,
 };
-use harness_engine::{RunLifecycle, RunState, check_sensors_fail};
+use harness_artifacts::{
+    Answer, ContractBundle, DeliveryReport, SCHEMA_VERSION, SensorImplementation, SensorLock,
+    SensorVisibility, Understanding,
+};
+use harness_engine::{
+    RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
+    check_sensors_fail,
+};
 use harness_sensors::ScriptSensorRunner;
 
 type InteractiveResult<T> = Result<T, Box<dyn Error>>;
@@ -69,8 +74,145 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         "Fontes dos sensores (fora do workspace): {}",
         sensor_dir.display()
     );
-    println!("Estado: {}", lifecycle.current());
-    println!("O plano e a execução da tarefa pertencem ao próximo marco.");
+
+    lifecycle.transition(RunState::Planning)?;
+    let mut planner = CodexCliPlanner::default();
+    let plan = planner
+        .plan(&workspace, &approved_bundle, &understanding.locale)
+        .map_err(|error| format!("Planner não conseguiu produzir o plano: {error}"))?;
+    plan.validate_for(&approved_bundle.contract, &approved_bundle.sensor_suite)
+        .map_err(|error| format!("Plano inválido: {error}"))?;
+    if plan.steps.len() != 1 || plan.integration_step_id != plan.steps[0].id {
+        return Err(
+            "Planos com vários passos ainda não são suportados; o plano deve ter um único passo de integração."
+                .into(),
+        );
+    }
+    fs::write(
+        artifact_dir.join("plan.json"),
+        serde_json::to_vec_pretty(&plan)?,
+    )?;
+    println!(
+        "\nPlano salvo em {}",
+        artifact_dir.join("plan.json").display()
+    );
+
+    lifecycle.transition(RunState::Executing)?;
+    let mut runner = ScriptSensorRunner::materialize(
+        &implementation,
+        &approved_bundle.sensor_suite,
+        &sensor_dir,
+    )
+    .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?;
+    let lock = SensorLock::from_suite(&approved_bundle.sensor_suite)?;
+    lock.verify(&approved_bundle.sensor_suite)?;
+    let mut executor = CodexCliExecutor::default();
+    let mut verifier = CodexCliVerifier::default();
+    let execution = RunCoordinator::with_verification_limit(3, 3)?
+        .stop_at_merge(true)
+        .execute(
+            RunRequest {
+                contract: &approved_bundle.contract,
+                suite: &approved_bundle.sensor_suite,
+                step_id: &plan.steps[0].id,
+                workspace: &workspace,
+            },
+            RunParticipants {
+                executor: &mut executor,
+                sensor_runner: &mut runner,
+                verifier: &mut verifier,
+            },
+        )
+        .map_err(std::io::Error::other)?;
+    save_execution(&artifact_dir, &run_id, &execution)?;
+    println!(
+        "\nExecução concluída. Estado: {}",
+        execution.states.last().unwrap()
+    );
+    println!(
+        "Relatório: {}",
+        artifact_dir.join("delivery_report.json").display()
+    );
+    if execution.verdict.approved {
+        println!("Revise as mudanças no workspace e faça o merge.");
+        Ok(())
+    } else {
+        Err("A execução não foi aprovada; veja o veredito e as issues no relatório.".into())
+    }
+}
+
+fn save_execution(
+    artifact_dir: &Path,
+    run_id: &str,
+    execution: &RunExecution,
+) -> InteractiveResult<()> {
+    let criteria_passed = execution
+        .verdict
+        .criteria
+        .iter()
+        .filter(|criterion| criterion.passed)
+        .count();
+    let report = DeliveryReport {
+        schema_version: SCHEMA_VERSION,
+        run_id: run_id.to_owned(),
+        summary: if execution.verdict.approved {
+            "Implementação aprovada; aguardando revisão e merge.".to_owned()
+        } else {
+            "Execução reprovada; veja o veredito e as issues.".to_owned()
+        },
+        criteria_passed,
+        criteria_total: execution.verdict.criteria.len(),
+        sensor_results: execution.sensor_results.clone(),
+        states: execution
+            .states
+            .iter()
+            .map(|state| state.as_str().to_owned())
+            .collect(),
+    };
+    fs::write(
+        artifact_dir.join("step_reports.json"),
+        serde_json::to_vec_pretty(&execution.step_reports)?,
+    )?;
+    fs::write(
+        artifact_dir.join("sensor_results.json"),
+        serde_json::to_vec_pretty(&execution.sensor_results)?,
+    )?;
+    fs::write(
+        artifact_dir.join("verdict.json"),
+        serde_json::to_vec_pretty(&execution.verdict)?,
+    )?;
+    fs::write(
+        artifact_dir.join("delivery_report.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )?;
+    let mut states = fs::read(artifact_dir.join("run.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|run| run["states"].as_array().cloned())
+        .map(|states| {
+            states
+                .into_iter()
+                .filter_map(|state| state.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let start = execution
+        .states
+        .iter()
+        .position(|state| *state == RunState::Planning)
+        .unwrap_or(0);
+    states.extend(
+        execution.states[start..]
+            .iter()
+            .map(|state| state.as_str().to_owned()),
+    );
+    fs::write(
+        artifact_dir.join("run.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": SCHEMA_VERSION,
+            "states": states,
+        }))?,
+    )?;
     Ok(())
 }
 
