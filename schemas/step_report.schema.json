@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StepReport",
+  "type": "object",
+  "properties": {
+    "attempts": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disputes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "step_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "step_id",
+    "attempts",
+    "summary",
+    "files_changed",
+    "decisions",
+    "disputes"
+  ]
+}

@@ -5,7 +5,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_artifacts::{
-    Contract, Criterion, DeliveryReport, SensorResult, SensorSpec, SensorVisibility,
+    Contract, DeliveryReport, SCHEMA_VERSION, SensorResult, SensorSpec, SensorSuite,
+    SensorVisibility,
 };
 use harness_engine::{RunLifecycle, RunState};
 
@@ -36,9 +37,10 @@ pub fn run() -> DemoResult<()> {
 }
 
 fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
-    let contract = demo_contract();
-    validate_contract(&contract)?;
-    let sensors = demo_sensors();
+    let contract = demo_contract()?;
+    contract.validate()?;
+    let sensors = demo_sensors()?;
+    sensors.validate_for(&contract)?;
     let mut lifecycle = RunLifecycle::new();
 
     lifecycle.transition(RunState::Understanding)?;
@@ -54,6 +56,7 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
     println!("Worker de demonstração escreveu convert.py no diretório temporário.");
 
     let visible = sensors
+        .sensors
         .iter()
         .filter(|sensor| sensor.visibility == SensorVisibility::Visible)
         .collect::<Vec<_>>();
@@ -65,17 +68,27 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
 
     lifecycle.transition(RunState::Verifying)?;
     let hidden = sensors
+        .sensors
         .iter()
         .filter(|sensor| sensor.visibility == SensorVisibility::Hidden)
         .collect::<Vec<_>>();
     let mut sensor_results = visible_results;
     sensor_results.extend(run_hidden_sensors(&hidden, &converter_path, workspace)?);
-    let criteria_passed = sensors
+    let criteria_passed = contract
+        .criteria
         .iter()
-        .filter(|sensor| {
-            sensor_results
+        .filter(|criterion| {
+            let linked = sensors
+                .sensors
                 .iter()
-                .any(|result| result.sensor_id == sensor.id && result.passed)
+                .filter(|sensor| sensor.criterion_id == criterion.id)
+                .collect::<Vec<_>>();
+            !linked.is_empty()
+                && linked.iter().all(|sensor| {
+                    sensor_results
+                        .iter()
+                        .any(|result| result.sensor_id == sensor.id && result.passed)
+                })
         })
         .count();
 
@@ -88,7 +101,7 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
     }
 
     let report = DeliveryReport {
-        schema_version: 1,
+        schema_version: SCHEMA_VERSION,
         run_id: format!("demo-{}", std::process::id()),
         summary: if criteria_passed == contract.criteria.len() {
             "Conversor CSV para JSON passou nos sensores visível e oculto.".to_owned()
@@ -111,45 +124,16 @@ fn run_in_workspace(workspace: &Path) -> DemoResult<()> {
     Ok(())
 }
 
-fn demo_contract() -> Contract {
-    Contract {
-        schema_version: 1,
-        objective: "Converter CSV com cabeçalho para JSON em stdout.".to_owned(),
-        criteria: vec![
-            Criterion {
-                id: "csv-json-records".to_owned(),
-                description: "Cada linha CSV vira um objeto JSON com os valores como strings."
-                    .to_owned(),
-            },
-            Criterion {
-                id: "csv-json-quoting".to_owned(),
-                description: "Campos CSV entre aspas, vírgulas e quebras de linha são preservados."
-                    .to_owned(),
-            },
-        ],
-    }
+fn demo_contract() -> DemoResult<Contract> {
+    Ok(serde_json::from_str(include_str!(
+        "../../../examples/cli-01/contract.json"
+    ))?)
 }
 
-fn demo_sensors() -> Vec<SensorSpec> {
-    vec![
-        SensorSpec {
-            id: "visible-record-conversion".to_owned(),
-            criterion_id: "csv-json-records".to_owned(),
-            visibility: SensorVisibility::Visible,
-        },
-        SensorSpec {
-            id: "hidden-quoted-fields".to_owned(),
-            criterion_id: "csv-json-quoting".to_owned(),
-            visibility: SensorVisibility::Hidden,
-        },
-    ]
-}
-
-fn validate_contract(contract: &Contract) -> DemoResult<()> {
-    if contract.schema_version != 1 || contract.criteria.len() != 2 {
-        return Err("contrato demo inválido".into());
-    }
-    Ok(())
+fn demo_sensors() -> DemoResult<SensorSuite> {
+    Ok(serde_json::from_str(include_str!(
+        "../../../examples/cli-01/sensor_suite.json"
+    ))?)
 }
 
 fn run_visible_sensors(
@@ -157,23 +141,40 @@ fn run_visible_sensors(
     converter: &Path,
     workspace: &Path,
 ) -> DemoResult<Vec<SensorResult>> {
-    let input = workspace.join("visible.csv");
-    fs::write(&input, "name,city\nAda,Lisbon\n")?;
-    let output = run_converter(converter, &input)?;
-    let parsed: serde_json::Value = serde_json::from_slice(&output)?;
-    let passed = parsed == serde_json::json!([{"name":"Ada", "city":"Lisbon"}]);
-    Ok(sensors
+    sensors
         .iter()
-        .map(|sensor| SensorResult {
-            sensor_id: sensor.id.clone(),
-            passed,
-            evidence: if passed {
-                "CSV simples convertido para um array JSON de objetos.".to_owned()
-            } else {
-                "A saída não corresponde aos registros esperados.".to_owned()
-            },
+        .map(|sensor| {
+            let (filename, csv, expected, evidence) = match sensor.id.as_str() {
+                "visible-record-conversion" => (
+                    "visible.csv",
+                    "name,city\nAda,Lisbon\n",
+                    serde_json::json!([{"name":"Ada", "city":"Lisbon"}]),
+                    "CSV simples convertido para um array JSON de objetos.",
+                ),
+                "visible-quoted-fields" => (
+                    "visible-quoted.csv",
+                    "name,city,quote\nAda,\"London, UK\",\"She said \"\"hello\"\"\"\n",
+                    serde_json::json!([{"name":"Ada", "city":"London, UK", "quote":"She said \"hello\""}]),
+                    "Vírgula e aspas escapadas preservadas em campos CSV.",
+                ),
+                other => return Err(format!("sensor visível desconhecido: {other}").into()),
+            };
+            let input = workspace.join(filename);
+            fs::write(&input, csv)?;
+            let output = run_converter(converter, &input)?;
+            let parsed: serde_json::Value = serde_json::from_slice(&output)?;
+            let passed = parsed == expected;
+            Ok(SensorResult {
+                sensor_id: sensor.id.clone(),
+                passed,
+                evidence: if passed {
+                    evidence.to_owned()
+                } else {
+                    "A saída não corresponde ao resultado esperado.".to_owned()
+                },
+            })
         })
-        .collect())
+        .collect()
 }
 
 fn run_hidden_sensors(
@@ -230,24 +231,27 @@ fn create_workspace() -> DemoResult<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{demo_contract, demo_sensors, validate_contract};
-    use harness_artifacts::SensorVisibility;
+    use super::{demo_contract, demo_sensors};
+    use harness_artifacts::{SCHEMA_VERSION, SensorVisibility};
 
     #[test]
-    fn demo_contract_has_one_visible_and_one_hidden_sensor_for_distinct_criteria() {
-        let contract = demo_contract();
-        let sensors = demo_sensors();
-        validate_contract(&contract).expect("contrato válido");
+    fn demo_artifacts_have_visible_and_hidden_coverage() {
+        let contract = demo_contract().expect("contrato demo parseável");
+        let sensors = demo_sensors().expect("sensor_suite demo parseável");
+        assert_eq!(contract.schema_version, SCHEMA_VERSION);
+        sensors.validate_for(&contract).expect("suite válida");
         assert_eq!(contract.criteria.len(), 2);
         assert_eq!(
             sensors
+                .sensors
                 .iter()
                 .filter(|sensor| sensor.visibility == SensorVisibility::Visible)
                 .count(),
-            1
+            2
         );
         assert_eq!(
             sensors
+                .sensors
                 .iter()
                 .filter(|sensor| sensor.visibility == SensorVisibility::Hidden)
                 .count(),

@@ -11,7 +11,14 @@ The core and CLI are written in Rust. The pilot tasks and their project preset u
 ```sh
 cargo build --workspace
 cargo test --workspace
+cargo run -p harness-cli -- schemas --check
 cargo run -p harness-cli -- run --demo
+```
+
+Regenerate versioned JSON Schemas after changing a Rust artifact:
+
+```sh
+cargo run -p harness-cli -- schemas --write
 ```
 
 ## Project status

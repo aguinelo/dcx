@@ -1,4 +1,5 @@
 mod demo;
+mod schemas;
 
 use harness_engine::RunState;
 
@@ -8,6 +9,12 @@ fn main() {
         Some("states") if args.next().is_none() => {
             for state in RunState::ALL {
                 println!("{state}");
+            }
+        }
+        Some("schemas") => {
+            if let Err(error) = schemas::run(args) {
+                eprintln!("Erro ao processar schemas: {error}");
+                std::process::exit(1);
             }
         }
         Some("run") if args.next().as_deref() == Some("--demo") && args.next().is_none() => {
@@ -20,7 +27,7 @@ fn main() {
             println!("harness {}", env!("CARGO_PKG_VERSION"));
         }
         _ => {
-            eprintln!("Uso: harness <states|--version|run --demo>");
+            eprintln!("Uso: harness <states|schemas --write|--check [DIR]|--version|run --demo>");
             std::process::exit(2);
         }
     }

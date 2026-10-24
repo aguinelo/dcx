@@ -31,3 +31,18 @@ fn demo_command_runs_the_vertical_smoke_path() {
     assert!(stdout.contains("\"hidden-quoted-fields\""));
     assert!(stdout.contains("\"done\""));
 }
+
+#[test]
+fn checked_in_schemas_match_rust_artifacts() {
+    let output = Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["schemas", "--check"])
+        .current_dir(env!("CARGO_MANIFEST_DIR").to_owned() + "/../..")
+        .output()
+        .expect("harness CLI deve iniciar");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

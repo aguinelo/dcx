@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunEvent",
+  "type": "object",
+  "properties": {
+    "event_type": {
+      "type": "string"
+    },
+    "payload": true,
+    "run_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "sequence",
+    "event_type",
+    "payload"
+  ]
+}

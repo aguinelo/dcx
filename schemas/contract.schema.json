@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Contract",
+  "type": "object",
+  "properties": {
+    "assumptions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Criterion"
+      }
+    },
+    "interface": {
+      "default": null
+    },
+    "objective": {
+      "type": "string"
+    },
+    "out_of_scope": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "objective",
+    "criteria"
+  ],
+  "$defs": {
+    "Criterion": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "description"
+      ]
+    }
+  }
+}

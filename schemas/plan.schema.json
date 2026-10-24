@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plan",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "integration_step_id": {
+      "type": "string"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PlanStep"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "steps",
+    "integration_step_id",
+    "rationale"
+  ],
+  "$defs": {
+    "PlanStep": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "files_hint": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "sensors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "criteria",
+        "sensors",
+        "depends_on"
+      ]
+    }
+  }
+}

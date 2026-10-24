@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DeliveryReport",
+  "type": "object",
+  "properties": {
+    "criteria_passed": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "criteria_total": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "sensor_results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SensorResult"
+      }
+    },
+    "states": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "summary",
+    "criteria_passed",
+    "criteria_total",
+    "sensor_results",
+    "states"
+  ],
+  "$defs": {
+    "SensorResult": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "sensor_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sensor_id",
+        "passed",
+        "evidence"
+      ]
+    }
+  }
+}

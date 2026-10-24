@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SensorSuite",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SensorSpec"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "sensors"
+  ],
+  "$defs": {
+    "SensorKind": {
+      "type": "string",
+      "enum": [
+        "computational",
+        "inferential"
+      ]
+    },
+    "SensorSpec": {
+      "type": "object",
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "criterion_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SensorKind"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/SensorType"
+        },
+        "visibility": {
+          "$ref": "#/$defs/SensorVisibility"
+        }
+      },
+      "required": [
+        "id",
+        "criterion_id",
+        "type",
+        "kind",
+        "visibility",
+        "purpose",
+        "check"
+      ]
+    },
+    "SensorType": {
+      "type": "string",
+      "enum": [
+        "test",
+        "command",
+        "query",
+        "judge"
+      ]
+    },
+    "SensorVisibility": {
+      "type": "string",
+      "enum": [
+        "visible",
+        "hidden"
+      ]
+    }
+  }
+}

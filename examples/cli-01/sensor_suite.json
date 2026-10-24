@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "sensors": [
+    {
+      "id": "visible-record-conversion",
+      "criterion_id": "csv-json-records",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "visible",
+      "purpose": "acceptance",
+      "check": "Converter CSV simples e comparar os registros JSON."
+    },
+    {
+      "id": "visible-quoted-fields",
+      "criterion_id": "csv-json-quoting",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "visible",
+      "purpose": "acceptance",
+      "check": "Preservar vírgulas e aspas escapadas em campos CSV."
+    },
+    {
+      "id": "hidden-quoted-fields",
+      "criterion_id": "csv-json-quoting",
+      "type": "test",
+      "kind": "computational",
+      "visibility": "hidden",
+      "purpose": "acceptance",
+      "check": "Preservar aspas escapadas e quebras de linha em campos CSV."
+    }
+  ]
+}

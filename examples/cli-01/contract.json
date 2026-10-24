@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "objective": "Converter CSV com cabeçalho para JSON em stdout.",
+  "assumptions": [
+    "A entrada usa UTF-8 e tem uma linha de cabeçalho."
+  ],
+  "criteria": [
+    {
+      "id": "csv-json-records",
+      "description": "Cada linha CSV vira um objeto JSON com os valores como strings."
+    },
+    {
+      "id": "csv-json-quoting",
+      "description": "Campos CSV entre aspas, vírgulas e quebras de linha são preservados."
+    }
+  ],
+  "interface": {
+    "command": "convert.py <input.csv>",
+    "output": "JSON array on stdout"
+  },
+  "constraints": [
+    "Não acessar rede."
+  ],
+  "out_of_scope": [
+    "Não escrever em arquivo de saída."
+  ]
+}

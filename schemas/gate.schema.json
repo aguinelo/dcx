@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gate",
+  "type": "object",
+  "properties": {
+    "context_summary": {
+      "type": "string"
+    },
+    "free_text_allowed": {
+      "type": "boolean"
+    },
+    "gate_type": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "question": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "gate_type",
+    "question",
+    "context_summary",
+    "options",
+    "free_text_allowed"
+  ]
+}
