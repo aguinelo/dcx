@@ -95,14 +95,28 @@ pub struct RunParticipants<'a> {
 /// Coordinates one planned step, retries visible failures, then verifies with hidden sensors.
 pub struct RunCoordinator {
     max_attempts: u32,
+    max_verifications: u32,
 }
 
 impl RunCoordinator {
     pub fn new(max_attempts: u32) -> Result<Self, String> {
+        Self::with_verification_limit(max_attempts, max_attempts)
+    }
+
+    pub fn with_verification_limit(
+        max_attempts: u32,
+        max_verifications: u32,
+    ) -> Result<Self, String> {
         if max_attempts == 0 {
             return Err("max_attempts must be greater than zero".to_owned());
         }
-        Ok(Self { max_attempts })
+        if max_verifications == 0 {
+            return Err("max_verifications must be greater than zero".to_owned());
+        }
+        Ok(Self {
+            max_attempts,
+            max_verifications,
+        })
     }
 
     pub fn execute(
@@ -151,6 +165,7 @@ impl RunCoordinator {
         let mut step_reports = Vec::new();
         let mut feedback = Vec::new();
         let mut changed_files = BTreeSet::new();
+        let mut verification_rounds = 0_u32;
 
         for attempt in 1..=self.max_attempts {
             let before = snapshot_workspace(workspace)?;
@@ -223,6 +238,7 @@ impl RunCoordinator {
 
             let mut verdict =
                 verifier.verify(contract, suite, &step_report, &sensor_results, workspace)?;
+            verification_rounds += 1;
             let verdict_covers_all_criteria = verdict.criteria.len() == contract.criteria.len()
                 && contract.criteria.iter().all(|criterion| {
                     verdict
@@ -257,10 +273,9 @@ impl RunCoordinator {
                     {
                         verdict.issues.push(harness_artifacts::VerdictIssue {
                             criterion_id: sensor.criterion_id.clone(),
-                            description: format!(
-                                "Acceptance sensor {} failed or returned no passing result.",
-                                sensor.id
-                            ),
+                            description:
+                                "An acceptance check for this criterion failed or returned no passing result."
+                                    .to_owned(),
                             severity: harness_artifacts::IssueSeverity::Blocker,
                         });
                     }
@@ -308,7 +323,7 @@ impl RunCoordinator {
             if feedback.is_empty() {
                 feedback.push("Verifier did not approve the implementation; re-check every contract criterion.".to_owned());
             }
-            if attempt == self.max_attempts {
+            if attempt == self.max_attempts || verification_rounds >= self.max_verifications {
                 lifecycle
                     .transition(RunState::Failed)
                     .map_err(|error| error.to_string())?;
@@ -842,6 +857,35 @@ mod tests {
 
     struct AlwaysApproveVerifier;
 
+    struct AlwaysRejectVerifier;
+
+    impl Verifier for AlwaysRejectVerifier {
+        fn verify(
+            &mut self,
+            contract: &Contract,
+            _suite: &SensorSuite,
+            _step_report: &StepReport,
+            _sensor_results: &[SensorResult],
+            _workspace: &Path,
+        ) -> Result<Verdict, String> {
+            Ok(Verdict {
+                schema_version: SCHEMA_VERSION,
+                approved: false,
+                criteria: contract
+                    .criteria
+                    .iter()
+                    .map(|criterion| CriterionVerdict {
+                        criterion_id: criterion.id.clone(),
+                        passed: false,
+                        evidence: vec!["verifier rejected".into()],
+                    })
+                    .collect(),
+                issues: vec![],
+                notes: vec![],
+            })
+        }
+    }
+
     impl Verifier for AlwaysApproveVerifier {
         fn verify(
             &mut self,
@@ -1030,6 +1074,53 @@ mod tests {
         assert!(!execution.verdict.approved);
         assert_eq!(execution.states.last(), Some(&RunState::Failed));
         assert!(execution.step_reports[0].files_changed.is_empty());
+        let issue = execution
+            .verdict
+            .issues
+            .iter()
+            .find(|issue| issue.criterion_id == "criterion")
+            .expect("falha oculta gera issue");
+        assert!(!issue.description.contains("hidden"));
+        assert!(!issue.description.contains("hidden check"));
+    }
+
+    #[test]
+    fn verification_limit_stops_after_the_configured_rounds() {
+        let contract = Contract {
+            schema_version: SCHEMA_VERSION,
+            objective: "objective".into(),
+            assumptions: vec![],
+            criteria: vec![Criterion {
+                id: "criterion".into(),
+                description: "observable".into(),
+            }],
+            interface: serde_json::Value::Null,
+            constraints: vec![],
+            out_of_scope: vec![],
+        };
+        let suite = check_suite();
+        let mut executor = MinimalExecutor;
+        let mut sensor_runner = AlwaysPassSensorRunner;
+        let mut verifier = AlwaysRejectVerifier;
+        let execution = RunCoordinator::with_verification_limit(3, 1)
+            .expect("limites válidos")
+            .execute(
+                RunRequest {
+                    contract: &contract,
+                    suite: &suite,
+                    step_id: "step-1",
+                    workspace: Path::new("."),
+                },
+                RunParticipants {
+                    executor: &mut executor,
+                    sensor_runner: &mut sensor_runner,
+                    verifier: &mut verifier,
+                },
+            )
+            .expect("execution returns a failed verdict");
+
+        assert_eq!(execution.step_reports.len(), 1);
+        assert_eq!(execution.states.last(), Some(&RunState::Failed));
     }
 
     #[test]
