@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::events::EventLog;
+use crate::lock::ProjectLock;
 use crate::providers::{self, Analyst};
 use harness_artifacts::{
     Answer, ContractBundle, DeliveryReport, Plan, SCHEMA_VERSION, SensorImplementation, SensorLock,
@@ -27,6 +28,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     }
 
     let workspace = std::env::current_dir()?;
+    let _lock = ProjectLock::acquire(&workspace)?;
     let mut analyst = providers::analyst()?;
     let mut lifecycle = RunLifecycle::new();
     lifecycle.transition(RunState::Understanding)?;
@@ -188,6 +190,102 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         );
         Err("A execução não foi aprovada; veja o veredito e as issues no relatório.".into())
     }
+}
+
+pub fn resume(run_id: &str) -> InteractiveResult<()> {
+    if run_id.trim().is_empty() {
+        return Err("Informe o id do run para retomar.".into());
+    }
+    let workspace = std::env::current_dir()?;
+    let _lock = ProjectLock::acquire(&workspace)?;
+    let artifact_dir = workspace.join(".harness").join("runs").join(run_id);
+    if !artifact_dir.is_dir() {
+        return Err(format!(
+            "Run {} não encontrado em {}.",
+            run_id,
+            artifact_dir.display()
+        )
+        .into());
+    }
+    let bundle: ContractBundle = read_json(&artifact_dir.join("contract_bundle.json"))?;
+    let plan: Plan = read_json(&artifact_dir.join("plan.json"))?;
+    let implementation: SensorImplementation =
+        read_json(&artifact_dir.join("sensor_implementation.json"))?;
+    plan.validate_for(&bundle.contract, &bundle.sensor_suite)
+        .map_err(|error| format!("Plano inválido: {error}"))?;
+    implementation
+        .validate_for(&bundle.sensor_suite)
+        .map_err(|error| format!("Sensores inválidos: {error}"))?;
+
+    let run_workspace = state_root().join("runs").join(run_id).join("workspace");
+    if !run_workspace.is_dir() {
+        workspace::copy_project(&workspace, &run_workspace, &[state_root()])
+            .map_err(|error| format!("Não foi possível preparar a cópia isolada: {error}"))?;
+    }
+    let sensor_dir = sensor_directory(run_id);
+    let mut runner =
+        ScriptSensorRunner::materialize(&implementation, &bundle.sensor_suite, &sensor_dir)
+            .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?
+            .sandbox_from_env()?;
+    let lock = SensorLock::from_suite(&bundle.sensor_suite)?;
+    lock.verify(&bundle.sensor_suite)?;
+    let mut executor = providers::executor()?;
+    let mut verifier = providers::verifier()?;
+    let mut events = EventLog::open(&artifact_dir, run_id)?;
+    events.append(
+        "run.resumed",
+        serde_json::json!({"workspace": run_workspace.display().to_string()}),
+    )?;
+    println!("Retomando run {} em {}", run_id, run_workspace.display());
+    let execution = execute_plan(
+        &run_workspace,
+        &plan,
+        &bundle,
+        &mut runner,
+        executor.as_mut(),
+        verifier.as_mut(),
+        &mut events,
+    )?;
+    save_execution(
+        &artifact_dir,
+        run_id,
+        &execution,
+        bundle.contract.criteria.len(),
+    )?;
+    println!(
+        "Execução concluída. Estado: {}",
+        execution.states.last().unwrap()
+    );
+    if execution.verdict.approved {
+        let changed = execution
+            .step_reports
+            .iter()
+            .flat_map(|report| report.files_changed.iter().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let applied = workspace::apply_changes(&workspace, &run_workspace, &changed)
+            .map_err(|error| format!("Não foi possível aplicar as mudanças aprovadas: {error}"))?;
+        events.append(
+            "changes.applied",
+            serde_json::json!({"files": applied.len()}),
+        )?;
+        println!("{} arquivo(s) aplicados ao projeto.", applied.len());
+        Ok(())
+    } else {
+        events.append(
+            "run.rejected",
+            serde_json::json!({"issues": execution.verdict.issues.len()}),
+        )?;
+        Err("A execução retomada não foi aprovada; veja o relatório.".into())
+    }
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> InteractiveResult<T> {
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Não foi possível ler {}: {error}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("JSON inválido em {}: {error}", path.display()).into())
 }
 
 fn execute_plan(
@@ -439,6 +537,10 @@ fn save_sensor_manifest(
     fs::write(
         artifact_dir.join("sensor_lock.json"),
         serde_json::to_vec_pretty(&lock)?,
+    )?;
+    fs::write(
+        artifact_dir.join("sensor_implementation.json"),
+        serde_json::to_vec_pretty(implementation)?,
     )?;
     Ok(())
 }

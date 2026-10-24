@@ -23,6 +23,25 @@ impl EventLog {
         })
     }
 
+    pub fn open(directory: &Path, run_id: &str) -> Result<Self, String> {
+        fs::create_dir_all(directory)
+            .map_err(|error| format!("cannot create event directory: {error}"))?;
+        let path = directory.join("events.jsonl");
+        let sequence = fs::read_to_string(&path)
+            .map(|contents| {
+                contents
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .count() as u64
+            })
+            .unwrap_or(0);
+        Ok(Self {
+            path,
+            run_id: run_id.to_owned(),
+            sequence,
+        })
+    }
+
     pub fn append(&mut self, event_type: &str, payload: serde_json::Value) -> Result<(), String> {
         self.sequence += 1;
         let event = RunEvent {

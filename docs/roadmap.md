@@ -12,7 +12,7 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R5 | Apply atômico, ledger de eventos e limpeza do estado | concluída; retomada pendente |
 | R6 | Isolamento de ambiente e sandbox opt-in dos sensores | concluída no macOS; Linux pendente |
 | R7 | Provider `auto`, CI e documentação operacional | concluída; custo por run pendente |
-| R8 | Passos paralelos, retomada e múltiplos runs | pendente |
+| R8 | Passos paralelos, retomada e múltiplos runs | parcial: lock e retomada; paralelismo pendente |
 
 ## Critérios de saída
 
@@ -24,4 +24,4 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 
 ## Próxima rodada
 
-R8 exige worktrees por passo e um journal de execução com passos concluídos. O estado atual executa passos sequencialmente na mesma cópia e não retoma um run interrompido.
+R8 já tem lock de projeto e `harness resume --run <id>`, que reexecuta o plano a partir dos artefatos e da cópia isolada. Ainda faltam worktrees por passo e paralelismo real; a retomada reexecuta o plano em vez de pular passos concluídos.

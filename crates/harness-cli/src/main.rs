@@ -3,6 +3,7 @@ mod codex;
 mod demo;
 mod events;
 mod interactive;
+mod lock;
 mod providers;
 mod schemas;
 mod state;
@@ -59,6 +60,23 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Some("resume") => match args.next().as_deref() {
+            Some("--run") => {
+                let run_id = args.next().unwrap_or_default();
+                if run_id.trim().is_empty() || args.next().is_some() {
+                    eprintln!("Uso: harness resume --run <run_id>");
+                    std::process::exit(2);
+                }
+                if let Err(error) = interactive::resume(&run_id) {
+                    eprintln!("Falha ao retomar o run: {error}");
+                    std::process::exit(1);
+                }
+            }
+            _ => {
+                eprintln!("Uso: harness resume --run <run_id>");
+                std::process::exit(2);
+            }
+        },
         Some("state") => match args.next().as_deref() {
             Some("prune") => {
                 if let Err(error) = state::run_prune(args) {
@@ -76,7 +94,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
+                "Uso: harness <states|schemas --write|--check [DIR]|resume --run <run_id>|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
             );
             std::process::exit(2);
         }
