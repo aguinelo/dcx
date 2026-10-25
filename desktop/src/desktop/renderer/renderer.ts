@@ -66,6 +66,9 @@ const ctxCount = el<HTMLSpanElement>('ctx-count');
 let busy = false;
 let currentWorkspace = '';
 let currentSessionId: string | undefined;
+let streamingAssistantBody: HTMLElement | undefined;
+let streamingAssistantText = '';
+let thinkingNode: HTMLElement | undefined;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
@@ -98,9 +101,12 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
     currentSessionId = sessionId;
     el<HTMLButtonElement>('promote-run').hidden = false;
     thread.replaceChildren();
+    streamingAssistantBody = undefined;
+    streamingAssistantText = '';
+    thinkingNode = undefined;
     for (const message of session.messages) {
       if (message.role === 'user') addUserMessage(message.content);
-      else addAssistantMessage(message.content);
+      else addAssistantMessage(message.content, false);
     }
     document.querySelectorAll('[data-session-id]').forEach((node) => {
       node.classList.toggle('is-active', (node as HTMLElement).dataset.sessionId === sessionId);
@@ -436,12 +442,29 @@ function blockMarkup(text: string): string {
 }
 
 function addUserMessage(text: string): void {
+  if (thinkingNode) {
+    thinkingNode.remove();
+    thinkingNode = undefined;
+  }
+  streamingAssistantBody = undefined;
+  streamingAssistantText = '';
   thread.append(row('msg msg--user', `<div class="msg__body">${escapeHtml(text)}</div>`));
   scrollToEnd();
 }
 
-function addAssistantMessage(text: string): void {
-  thread.append(row('msg', `<div class="msg__body">${blockMarkup(text)}</div>`));
+function addAssistantMessage(text: string, merge = true): void {
+  if (merge && streamingAssistantBody) {
+    streamingAssistantText += text;
+    streamingAssistantBody.innerHTML = blockMarkup(streamingAssistantText);
+    scrollToEnd();
+    return;
+  }
+  const node = row('msg', `<div class="msg__body">${blockMarkup(text)}</div>`);
+  thread.append(node);
+  if (merge) {
+    streamingAssistantBody = node.querySelector<HTMLElement>('.msg__body') ?? undefined;
+    streamingAssistantText = text;
+  }
   scrollToEnd();
 }
 
@@ -785,6 +808,7 @@ bridge.onEvent((payload) => {
       break;
 
     case 'text':
+      setThinking(false);
       addAssistantMessage(payload.text ?? '');
       break;
 
@@ -793,6 +817,7 @@ bridge.onEvent((payload) => {
       void updateContext(accumulatedTokens);
       busy = false;
       setPlaceholder();
+      setThinking(false);
       break;
     }
 
@@ -800,6 +825,7 @@ bridge.onEvent((payload) => {
       showNotice('Falha ao falar com o modelo', payload.message ?? 'erro desconhecido', true);
       busy = false;
       setPlaceholder();
+      setThinking(false);
       break;
 
     case 'run_event':
@@ -811,10 +837,12 @@ bridge.onEvent((payload) => {
         addAssistantMessage('Run concluído.');
         busy = false;
         setPlaceholder();
+        setThinking(false);
       } else if (payload.event === 'failed' || payload.event === 'cancelled') {
         showNotice('Run encerrado', payload.event, payload.event === 'failed');
         busy = false;
         setPlaceholder();
+        setThinking(false);
       }
       break;
 
@@ -829,7 +857,19 @@ function summarize(value: unknown): string {
 }
 
 function setPlaceholder(): void {
-  input.placeholder = busy ? 'O agente está trabalhando…' : 'Digite / para comandos';
+  input.placeholder = 'Digite / para comandos';
+}
+
+function setThinking(active: boolean): void {
+  if (active && !thinkingNode) {
+    thinkingNode = row('thinking', '<span class="thinking__dot">◌</span><span>Thought process</span>');
+    thread.append(thinkingNode);
+    scrollToEnd();
+  } else if (!active && thinkingNode) {
+    thinkingNode.classList.add('thinking--done');
+    const label = thinkingNode.querySelector('span:last-child');
+    if (label) label.textContent = 'Thought process';
+  }
 }
 
 async function promoteCurrentSession(): Promise<void> {
@@ -840,6 +880,7 @@ async function promoteCurrentSession(): Promise<void> {
     await bridge.approve(currentWorkspace, currentSessionId);
     const started = await bridge.start(currentWorkspace, currentSessionId);
     busy = true;
+    setThinking(true);
     setPlaceholder();
     showNotice('Run iniciado', `Job ${started.run_id} em execução.`, false);
   } catch (error) {
@@ -859,6 +900,7 @@ async function submit(): Promise<void> {
   if (prompt === '' || busy) return;
 
   busy = true;
+  setThinking(true);
   input.value = '';
   autoGrow();
   setPlaceholder();
@@ -875,6 +917,7 @@ async function submit(): Promise<void> {
     );
     busy = false;
     setPlaceholder();
+    setThinking(false);
   }
 }
 

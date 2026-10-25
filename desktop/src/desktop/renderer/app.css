@@ -547,6 +547,28 @@ button {
   line-height: var(--lh-body-sm);
 }
 
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  padding: 4px 0;
+}
+.thinking__dot {
+  color: var(--accent);
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+.thinking--done .thinking__dot {
+  animation: none;
+  opacity: 0.7;
+}
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
 .notice {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
