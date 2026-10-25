@@ -54,6 +54,14 @@ pub struct SessionSummary {
     pub updated_at_unix_ms: u64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PromotionApproval {
+    pub schema_version: u32,
+    pub session_id: String,
+    pub request: String,
+    pub approved_at_unix_ms: u64,
+}
+
 #[derive(Debug)]
 pub struct ChatReply {
     pub text: String,
@@ -521,6 +529,28 @@ pub fn request_from_session(workspace: &Path, session_id: &str) -> Result<String
     Ok(prompt)
 }
 
+pub fn approve_session(workspace: &Path, session_id: &str) -> Result<PromotionApproval, String> {
+    let request = request_from_session(workspace, session_id)?;
+    let approval = PromotionApproval {
+        schema_version: SESSION_SCHEMA_VERSION,
+        session_id: session_id.to_owned(),
+        request,
+        approved_at_unix_ms: now_ms(),
+    };
+    let path = sessions_root(workspace)
+        .join(session_id)
+        .join("promotion_approval.json");
+    let bytes = serde_json::to_vec_pretty(&approval)
+        .map_err(|error| format!("não foi possível serializar aprovação: {error}"))?;
+    fs::write(&path, bytes).map_err(|error| {
+        format!(
+            "não foi possível salvar aprovação {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(approval)
+}
+
 pub fn send_message(
     workspace: &Path,
     session: &mut ChatSession,
@@ -815,6 +845,16 @@ mod tests {
         assert!(request.contains("Construir um conversor CSV para JSON"));
         assert!(request.contains("Preservar campos entre aspas"));
         assert!(!request.contains("Use streaming"));
+
+        let approval = approve_session(&workspace, &session_id).expect("aprovar promoção");
+        assert_eq!(approval.session_id, session_id);
+        assert!(
+            workspace
+                .join(".harness/sessions")
+                .join(&session_id)
+                .join("promotion_approval.json")
+                .is_file()
+        );
 
         fs::remove_dir_all(workspace).expect("limpar workspace");
     }

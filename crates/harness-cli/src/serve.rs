@@ -20,6 +20,13 @@ struct PromoteRequest {
     session_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ApprovePromotionRequest {
+    workspace: String,
+    session_id: String,
+    approved: bool,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
@@ -90,6 +97,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/sessions") => handle_sessions(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
         ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
+        ("POST", "/runs/from-session/approve") => handle_approve_promotion(&mut stream, body),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -117,6 +125,35 @@ fn handle_promote(stream: &mut TcpStream, body: &str) -> Result<(), String> {
     }))
     .map_err(|error| format!("não foi possível serializar promoção: {error}"))?;
     respond_json(stream, 200, &body)
+}
+
+fn handle_approve_promotion(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: ApprovePromotionRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    if !request.approved {
+        return respond_json(
+            stream,
+            200,
+            &serde_json::json!({
+                "status": "rejected",
+                "session_id": request.session_id,
+            })
+            .to_string(),
+        );
+    }
+    let workspace = PathBuf::from(request.workspace);
+    let approval = chat::approve_session(&workspace, &request.session_id)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({
+            "status": "approved",
+            "session_id": approval.session_id,
+            "approved_at_unix_ms": approval.approved_at_unix_ms,
+            "next": format!("harness run --from-session {}", approval.session_id),
+        })
+        .to_string(),
+    )
 }
 
 fn query_value(query: &str, name: &str) -> Option<String> {
