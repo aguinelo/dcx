@@ -115,6 +115,8 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/runs/from-session/status") => handle_promotion_status(&mut stream, query),
         ("GET", "/runs/status") => handle_run_status(&mut stream, query),
         ("GET", "/runs/events") => handle_run_events(&mut stream, query),
+        ("GET", "/projects") => handle_projects(&mut stream, query),
+        ("GET", "/runs/artifacts") => handle_artifacts(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -244,21 +246,86 @@ fn handle_run_events(stream: &mut TcpStream, query: &str) -> Result<(), String> 
         query_value(query, "run_id").ok_or("GET /runs/events exige &run_id=<id>".to_owned())?;
     let workspace = PathBuf::from(percent_decode(&workspace)?);
     let run_id = percent_decode(&run_id)?;
-    let events = crate::jobs::events(&workspace, &run_id)?;
     stream
         .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
         .map_err(|error| error.to_string())?;
-    for event in events {
-        let payload = format!(
-            "event: {}\ndata: {}\n\n",
-            event.event,
-            serde_json::to_string(&event.data).map_err(|error| error.to_string())?
-        );
-        stream
-            .write_all(payload.as_bytes())
-            .map_err(|error| error.to_string())?;
+    let started = std::time::Instant::now();
+    let mut sent = 0;
+    while started.elapsed() < std::time::Duration::from_secs(30) {
+        let events = crate::jobs::events(&workspace, &run_id)?;
+        for event in events.into_iter().skip(sent) {
+            let payload = format!(
+                "event: {}\ndata: {}\n\n",
+                event.event,
+                serde_json::to_string(&event.data).map_err(|error| error.to_string())?
+            );
+            stream
+                .write_all(payload.as_bytes())
+                .map_err(|error| error.to_string())?;
+            stream.flush().map_err(|error| error.to_string())?;
+            sent += 1;
+        }
+        if let Ok(job) = crate::jobs::load(&workspace, &run_id) {
+            if matches!(job.status.as_str(), "done" | "failed" | "cancelled") {
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
     stream.flush().map_err(|error| error.to_string())
+}
+
+fn handle_projects(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let root =
+        query_value(query, "root").ok_or("GET /projects exige ?root=<diretório>".to_owned())?;
+    let root = PathBuf::from(percent_decode(&root)?);
+    let mut projects = Vec::new();
+    for entry in std::fs::read_dir(&root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            projects.push(entry.path());
+        }
+    }
+    projects.sort();
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"projects": projects}).to_string(),
+    )
+}
+
+fn handle_artifacts(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /runs/artifacts exige ?workspace=<diretório>".to_owned())?;
+    let run_id =
+        query_value(query, "run_id").ok_or("GET /runs/artifacts exige &run_id=<id>".to_owned())?;
+    let root = PathBuf::from(percent_decode(&workspace)?)
+        .join(".harness")
+        .join("runs")
+        .join(percent_decode(&run_id)?);
+    let mut files = Vec::new();
+    if root.is_dir() {
+        for entry in std::fs::read_dir(&root).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_file()
+            {
+                files.push(entry.file_name());
+            }
+        }
+    }
+    files.sort();
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"run_id": run_id, "files": files}).to_string(),
+    )
 }
 
 fn query_value(query: &str, name: &str) -> Option<String> {

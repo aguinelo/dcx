@@ -101,6 +101,6 @@ Para abrir a API local que um app desktop pode consumir:
 cargo run -q -p harness-cli -- serve --bind 127.0.0.1:8787
 ```
 
-O daemon expõe `GET /health`, `GET /sessions?workspace=<dir>`, `POST /chat`, `POST /runs/from-session`, `GET /runs/from-session/status`, `POST /runs/from-session/approve`, `POST /runs/from-session/start`, `POST /runs/input`, `GET /runs/status` e `GET /runs/events`. Após a aprovação, `POST /runs/from-session/start` inicia o mesmo CLI em um worker com stdin/stdout controlados por eventos; respostas a perguntas são enviadas por `POST /runs/input` e o progresso é reproduzido por `GET /runs/events`.
+O daemon expõe também `GET /projects?root=<dir>` e `GET /runs/artifacts?workspace=<dir>&run_id=<id>`. `GET /runs/events` mantém a conexão aberta por até 30 segundos, reproduz eventos já emitidos e acompanha novos eventos; o cliente pode reconectar até o estado final. Após a aprovação, `POST /runs/from-session/start` inicia o mesmo CLI em um worker com stdin/stdout controlados por eventos; respostas a perguntas são enviadas por `POST /runs/input`.
 
 O `.env` é ignorado pelo Git, não é copiado para o workspace isolado de um run e não pode ser aplicado de volta pelo merge gate, então chaves como `ANTHROPIC_API_KEY` e `MINIMAX_API_KEY` podem ficar nele sem serem enviadas ao executor. O `.env.example` versionado documenta os providers, modelos e chaves.

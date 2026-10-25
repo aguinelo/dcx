@@ -7,7 +7,12 @@ use std::thread;
 
 use crate::jobs;
 
-type InputMap = HashMap<String, Arc<Mutex<ChildStdin>>>;
+struct InputHandle {
+    stdin: ChildStdin,
+    workspace: std::path::PathBuf,
+}
+
+type InputMap = HashMap<String, Arc<Mutex<InputHandle>>>;
 
 fn inputs() -> &'static Mutex<InputMap> {
     static INPUTS: OnceLock<Mutex<InputMap>> = OnceLock::new();
@@ -49,7 +54,13 @@ fn execute(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Strin
     inputs()
         .lock()
         .map_err(|_| "lock de inputs indisponível".to_owned())?
-        .insert(run_id.to_owned(), Arc::new(Mutex::new(stdin)));
+        .insert(
+            run_id.to_owned(),
+            Arc::new(Mutex::new(InputHandle {
+                stdin,
+                workspace: workspace.to_path_buf(),
+            })),
+        );
     let stdout = child.stdout.take().ok_or("worker sem stdout")?;
     let stderr = child.stderr.take().ok_or("worker sem stderr")?;
     let workspace_for_stdout = workspace.to_path_buf();
@@ -62,6 +73,18 @@ fn execute(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Strin
                 "output",
                 serde_json::json!({"text": line}),
             );
+            if line.contains("Pergunta bloqueante:")
+                || line.contains("Aprovar contrato?")
+                || line.contains("O que precisa mudar no contrato?")
+            {
+                let _ = jobs::set_status(&workspace_for_stdout, &run_for_stdout, "awaiting_input");
+                let _ = jobs::append_event(
+                    &workspace_for_stdout,
+                    &run_for_stdout,
+                    "awaiting_input",
+                    serde_json::json!({"text": line}),
+                );
+            }
         }
     });
     let workspace_for_stderr = workspace.to_path_buf();
@@ -102,14 +125,22 @@ pub fn send_input(run_id: &str, input: &str) -> Result<(), String> {
         .get(run_id)
         .cloned()
         .ok_or_else(|| format!("run {run_id} não está aguardando entrada"))?;
-    let mut stdin = handle
+    let mut handle = handle
         .lock()
         .map_err(|_| "stdin do worker indisponível".to_owned())?;
-    writeln!(stdin, "{input}")
+    writeln!(handle.stdin, "{input}")
         .map_err(|error| format!("não foi possível enviar entrada: {error}"))?;
-    stdin
+    handle
+        .stdin
         .flush()
-        .map_err(|error| format!("não foi possível enviar entrada: {error}"))
+        .map_err(|error| format!("não foi possível enviar entrada: {error}"))?;
+    jobs::set_status(&handle.workspace, run_id, "running")?;
+    jobs::append_event(
+        &handle.workspace,
+        run_id,
+        "input_received",
+        serde_json::json!({"text": input}),
+    )
 }
 
 #[cfg(test)]
