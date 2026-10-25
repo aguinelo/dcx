@@ -68,6 +68,8 @@ let currentWorkspace = '';
 let currentSessionId: string | undefined;
 let streamingAssistantBody: HTMLElement | undefined;
 let streamingAssistantText = '';
+let streamingPendingText = '';
+let streamFlushTimer: number | undefined;
 let thinkingNode: HTMLElement | undefined;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
@@ -103,6 +105,7 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
     thread.replaceChildren();
     streamingAssistantBody = undefined;
     streamingAssistantText = '';
+    streamingPendingText = '';
     thinkingNode = undefined;
     for (const message of session.messages) {
       if (message.role === 'user') addUserMessage(message.content);
@@ -442,21 +445,24 @@ function blockMarkup(text: string): string {
 }
 
 function addUserMessage(text: string): void {
+  flushAssistantStream();
   if (thinkingNode) {
     thinkingNode.remove();
     thinkingNode = undefined;
   }
   streamingAssistantBody = undefined;
   streamingAssistantText = '';
+  streamingPendingText = '';
   thread.append(row('msg msg--user', `<div class="msg__body">${escapeHtml(text)}</div>`));
   scrollToEnd();
 }
 
 function addAssistantMessage(text: string, merge = true): void {
-  if (merge && streamingAssistantBody) {
-    streamingAssistantText += text;
-    streamingAssistantBody.innerHTML = blockMarkup(streamingAssistantText);
-    scrollToEnd();
+  if (merge) {
+    streamingPendingText += text;
+    const hasBoundary = /(?:\n\s*\n|[.!?。！？](?:\s|$))/.test(streamingPendingText);
+    if (streamingPendingText.length >= 180 || hasBoundary) flushAssistantStream();
+    else scheduleAssistantFlush();
     return;
   }
   const node = row('msg', `<div class="msg__body">${blockMarkup(text)}</div>`);
@@ -465,6 +471,31 @@ function addAssistantMessage(text: string, merge = true): void {
     streamingAssistantBody = node.querySelector<HTMLElement>('.msg__body') ?? undefined;
     streamingAssistantText = text;
   }
+  scrollToEnd();
+}
+
+function scheduleAssistantFlush(): void {
+  if (streamFlushTimer !== undefined) return;
+  streamFlushTimer = window.setTimeout(() => {
+    streamFlushTimer = undefined;
+    flushAssistantStream();
+  }, 120);
+}
+
+function flushAssistantStream(): void {
+  if (streamFlushTimer !== undefined) {
+    window.clearTimeout(streamFlushTimer);
+    streamFlushTimer = undefined;
+  }
+  if (!streamingPendingText) return;
+  streamingAssistantText += streamingPendingText;
+  streamingPendingText = '';
+  if (!streamingAssistantBody) {
+    const node = row('msg', '<div class="msg__body"></div>');
+    thread.append(node);
+    streamingAssistantBody = node.querySelector<HTMLElement>('.msg__body') ?? undefined;
+  }
+  if (streamingAssistantBody) streamingAssistantBody.innerHTML = blockMarkup(streamingAssistantText);
   scrollToEnd();
 }
 
@@ -795,10 +826,12 @@ let accumulatedTokens = 0;
 bridge.onEvent((payload) => {
   switch (payload.type) {
     case 'tool_start':
+      flushAssistantStream();
       if (payload.id) addActivity(payload.id, payload.name ?? 'tool', summarize(payload.input));
       break;
 
     case 'tool_end':
+      flushAssistantStream();
       if (payload.id)
         finishActivity(payload.id, payload.ok ?? false, firstLine(payload.output ?? ''));
       break;
@@ -813,6 +846,7 @@ bridge.onEvent((payload) => {
       break;
 
     case 'done': {
+      flushAssistantStream();
       accumulatedTokens += (payload.inputTokens ?? 0) + (payload.outputTokens ?? 0);
       void updateContext(accumulatedTokens);
       busy = false;
@@ -822,6 +856,7 @@ bridge.onEvent((payload) => {
     }
 
     case 'error':
+      flushAssistantStream();
       showNotice('Falha ao falar com o modelo', payload.message ?? 'erro desconhecido', true);
       busy = false;
       setPlaceholder();
@@ -832,8 +867,10 @@ bridge.onEvent((payload) => {
       if (payload.event === 'output' && typeof payload.data?.text === 'string') {
         addAssistantMessage(payload.data.text);
       } else if (payload.event === 'awaiting_input') {
+        flushAssistantStream();
         showNotice('Run aguardando resposta', String(payload.data?.text ?? 'Responda pela interface.'), false);
       } else if (payload.event === 'done') {
+        flushAssistantStream();
         addAssistantMessage('Run concluído.');
         busy = false;
         setPlaceholder();
