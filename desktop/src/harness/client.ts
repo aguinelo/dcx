@@ -125,6 +125,45 @@ export class HarnessClient {
     }
   }
 
+  async chat(
+    workspace: string,
+    message: string,
+    sessionId: string | undefined,
+    onEvent: (event: HarnessEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const response = await this.fetchImpl(`${this.baseUrl}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspace, message, ...(sessionId ? { session_id: sessionId } : {}) }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Harness chat HTTP ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let session: string | undefined;
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const records = buffer.split('\n\n');
+      buffer = records.pop() ?? '';
+      for (const record of records) {
+        const eventLine = record.split('\n').find((line) => line.startsWith('event: '));
+        const dataLine = record.split('\n').find((line) => line.startsWith('data: '));
+        if (!dataLine) continue;
+        const event = eventLine?.slice('event: '.length) ?? 'message';
+        const data = JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
+        if (event === 'session' && typeof data.session_id === 'string') session = data.session_id;
+        onEvent({ event, data });
+      }
+    }
+    return session;
+  }
+
   private async get<T>(path: string): Promise<T> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`);
     return this.read<T>(response);

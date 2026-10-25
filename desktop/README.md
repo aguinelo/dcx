@@ -40,6 +40,21 @@ pnpm desktop
 `pnpm desktop` compila e abre a janela. O `pnpm install` precisa baixar o
 Electron (~250 MB); é o passo mais lento.
 
+### Usar o Harness local
+
+Inicie o daemon Rust na raiz do projeto e informe o workspace que a janela deve
+usar:
+
+```bash
+cargo run -p harness-cli -- serve --bind 127.0.0.1:8787
+HARNESS_WORKSPACE=/caminho/do/projeto pnpm desktop
+```
+
+O desktop usa `HARNESS_URL` (padrão `http://127.0.0.1:8787`) e conversa com o
+Harness por `/chat`. A sessão fica no daemon e o renderer não recebe acesso ao
+filesystem. `REPL_DESKTOP_LOCAL=1` mantém o agente local da base apenas para
+testes/demo, sem ser o caminho de produção.
+
 Para rodar sem credencial de modelo, o provider roteirizado está ligado por
 variável de ambiente:
 

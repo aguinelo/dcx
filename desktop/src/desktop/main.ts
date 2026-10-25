@@ -9,6 +9,7 @@ import { DEMO_SCRIPT, createScriptedProvider } from '../testing/scripted.ts';
 import { ToolRegistry, defaultTools } from '../tools/registry.ts';
 import { PersistentShell } from '../tools/shell.ts';
 import type { ToolContext } from '../tools/types.ts';
+import { HarnessClient } from '../harness/client.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rendererRoot = path.join(here, 'renderer');
@@ -20,6 +21,15 @@ let mainWindow: BrowserWindow | undefined;
 let context: ToolContext | undefined;
 let registry: ToolRegistry | undefined;
 let abortController: AbortController | undefined;
+let harnessSessionId: string | undefined;
+
+function getHarnessWorkspace(): string {
+  return process.env.HARNESS_WORKSPACE ?? app.getPath('home');
+}
+
+function getHarnessClient(): HarnessClient {
+  return new HarnessClient({ baseUrl: process.env.HARNESS_URL ?? 'http://127.0.0.1:8787' });
+}
 
 function getContext(): ToolContext {
   context ??= {
@@ -148,6 +158,30 @@ ipcMain.handle('agent:run', async (_event, prompt: string) => {
   abortController = new AbortController();
 
   try {
+    if (process.env.REPL_DESKTOP_LOCAL !== '1') {
+      const client = getHarnessClient();
+      const sessionId = await client.chat(
+        getHarnessWorkspace(),
+        prompt,
+        harnessSessionId,
+        (event) => {
+          if (event.event === 'session' && typeof event.data.session_id === 'string') {
+            harnessSessionId = event.data.session_id;
+            return;
+          }
+          if (event.event === 'token' && typeof event.data.text === 'string') {
+            send({ type: 'text', text: event.data.text });
+          } else if (event.event === 'done') {
+            send({ type: 'done' });
+          } else if (event.event === 'error') {
+            send({ type: 'error', message: String(event.data.message ?? 'erro do Harness') });
+          }
+        },
+        abortController.signal,
+      );
+      harnessSessionId = sessionId ?? harnessSessionId;
+      return;
+    }
     const result = await runAgent({
       provider: getProvider(),
       registry: getRegistry(),
