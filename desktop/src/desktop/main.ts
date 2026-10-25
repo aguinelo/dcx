@@ -227,3 +227,23 @@ ipcMain.handle('harness:session', (_event, workspace: string, sessionId: string)
   getHarnessClient().session(workspace, sessionId),
 );
 ipcMain.handle('harness:projects', (_event, root: string) => getHarnessClient().projects(root));
+ipcMain.handle('harness:promote', (_event, workspace: string, sessionId: string) =>
+  getHarnessClient().promote(workspace, sessionId),
+);
+ipcMain.handle('harness:approve', (_event, workspace: string, sessionId: string) =>
+  getHarnessClient().approve(workspace, sessionId, true),
+);
+ipcMain.handle('harness:start', async (_event, workspace: string, sessionId: string) => {
+  const client = getHarnessClient();
+  const started = await client.start(workspace, sessionId);
+  void client.events(workspace, started.run_id, (event) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:event', { type: 'run_event', event: event.event, data: event.data });
+    }
+  }).catch((error) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:event', { type: 'error', message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  return started;
+});

@@ -34,4 +34,7 @@ contextBridge.exposeInMainWorld('repl', {
   sessions: (workspace) => ipcRenderer.invoke('harness:sessions', workspace),
   session: (workspace, sessionId) => ipcRenderer.invoke('harness:session', workspace, sessionId),
   projects: (root) => ipcRenderer.invoke('harness:projects', root),
+  promote: (workspace, sessionId) => ipcRenderer.invoke('harness:promote', workspace, sessionId),
+  approve: (workspace, sessionId) => ipcRenderer.invoke('harness:approve', workspace, sessionId),
+  start: (workspace, sessionId) => ipcRenderer.invoke('harness:start', workspace, sessionId),
 });

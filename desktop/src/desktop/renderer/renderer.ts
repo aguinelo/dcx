@@ -19,7 +19,7 @@ import {
 } from './simulation.ts';
 
 interface AgentEventPayload {
-  type: 'text' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error';
+  type: 'text' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error' | 'run_event';
   id?: string;
   name?: string;
   input?: unknown;
@@ -30,6 +30,8 @@ interface AgentEventPayload {
   message?: string;
   inputTokens?: number;
   outputTokens?: number;
+  event?: string;
+  data?: Record<string, unknown>;
 }
 
 interface ReplBridge {
@@ -41,6 +43,9 @@ interface ReplBridge {
   sessions(workspace: string): Promise<Array<{ session_id: string; message_count: number; updated_at_unix_ms: number }>>;
   session(workspace: string, sessionId: string): Promise<{ messages: Array<{ role: 'user' | 'assistant'; content: string }> }>;
   projects(root: string): Promise<Array<{ path: string }>>;
+  promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }>;
+  approve(workspace: string, sessionId: string): Promise<unknown>;
+  start(workspace: string, sessionId: string): Promise<{ run_id: string; status: string }>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;
@@ -59,6 +64,8 @@ const ctxPct = el<HTMLSpanElement>('ctx-pct');
 const ctxCount = el<HTMLSpanElement>('ctx-count');
 
 let busy = false;
+let currentWorkspace = '';
+let currentSessionId: string | undefined;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
@@ -87,6 +94,9 @@ function renderAllConversations(items: Array<{ title: string; active?: boolean; 
 async function loadSession(workspace: string, sessionId: string): Promise<void> {
   try {
     const session = await bridge.session(workspace, sessionId);
+    currentWorkspace = workspace;
+    currentSessionId = sessionId;
+    el<HTMLButtonElement>('promote-run').hidden = false;
     thread.replaceChildren();
     for (const message of session.messages) {
       if (message.role === 'user') addUserMessage(message.content);
@@ -792,6 +802,22 @@ bridge.onEvent((payload) => {
       setPlaceholder();
       break;
 
+    case 'run_event':
+      if (payload.event === 'output' && typeof payload.data?.text === 'string') {
+        addAssistantMessage(payload.data.text);
+      } else if (payload.event === 'awaiting_input') {
+        showNotice('Run aguardando resposta', String(payload.data?.text ?? 'Responda pela interface.'), false);
+      } else if (payload.event === 'done') {
+        addAssistantMessage('Run concluído.');
+        busy = false;
+        setPlaceholder();
+      } else if (payload.event === 'failed' || payload.event === 'cancelled') {
+        showNotice('Run encerrado', payload.event, payload.event === 'failed');
+        busy = false;
+        setPlaceholder();
+      }
+      break;
+
     default:
       break;
   }
@@ -804,6 +830,21 @@ function summarize(value: unknown): string {
 
 function setPlaceholder(): void {
   input.placeholder = busy ? 'O agente está trabalhando…' : 'Digite / para comandos';
+}
+
+async function promoteCurrentSession(): Promise<void> {
+  if (!currentWorkspace || !currentSessionId || busy) return;
+  try {
+    const preview = await bridge.promote(currentWorkspace, currentSessionId);
+    if (!window.confirm(`Promover esta conversa para execução?\n\n${preview.request}`)) return;
+    await bridge.approve(currentWorkspace, currentSessionId);
+    const started = await bridge.start(currentWorkspace, currentSessionId);
+    busy = true;
+    setPlaceholder();
+    showNotice('Run iniciado', `Job ${started.run_id} em execução.`, false);
+  } catch (error) {
+    showNotice('Não foi possível iniciar o run', error instanceof Error ? error.message : String(error), true);
+  }
 }
 
 /* ── Input ───────────────────────────────────────────────────── */
@@ -922,6 +963,9 @@ function handleChromeAction(action: string): void {
       return;
     case 'close-settings':
       el('theme-settings').hidden = true;
+      return;
+    case 'promote':
+      void promoteCurrentSession();
       return;
     case 'new':
       thread.replaceChildren();
