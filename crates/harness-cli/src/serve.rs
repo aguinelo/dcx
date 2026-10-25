@@ -33,6 +33,12 @@ struct StartRunRequest {
     session_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RunInputRequest {
+    run_id: String,
+    input: String,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
@@ -105,6 +111,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
         ("POST", "/runs/from-session/approve") => handle_approve_promotion(&mut stream, body),
         ("POST", "/runs/from-session/start") => handle_start_run(&mut stream, body),
+        ("POST", "/runs/input") => handle_run_input(&mut stream, body),
         ("GET", "/runs/from-session/status") => handle_promotion_status(&mut stream, query),
         ("GET", "/runs/status") => handle_run_status(&mut stream, query),
         ("GET", "/runs/events") => handle_run_events(&mut stream, query),
@@ -187,6 +194,7 @@ fn handle_start_run(stream: &mut TcpStream, body: &str) -> Result<(), String> {
     let workspace = PathBuf::from(request.workspace);
     let prompt = chat::approved_request(&workspace, &request.session_id)?;
     let job = crate::jobs::enqueue(&workspace, &request.session_id, &prompt)?;
+    crate::worker::start(&workspace, &job.run_id, &job.session_id)?;
     respond_json(
         stream,
         202,
@@ -197,6 +205,20 @@ fn handle_start_run(stream: &mut TcpStream, body: &str) -> Result<(), String> {
             "next": "consulte GET /runs/status?workspace=<dir>&run_id=<id>"
         }))
         .map_err(|error| error.to_string())?,
+    )
+}
+
+fn handle_run_input(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: RunInputRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    if request.input.trim().is_empty() {
+        return Err("input não pode ser vazio".to_owned());
+    }
+    crate::worker::send_input(&request.run_id, &request.input)?;
+    respond_json(
+        stream,
+        202,
+        &serde_json::json!({"status": "sent", "run_id": request.run_id}).to_string(),
     )
 }
 

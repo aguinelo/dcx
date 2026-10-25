@@ -103,6 +103,18 @@ pub fn load(workspace: &Path, run_id: &str) -> Result<RunJob, String> {
         .map_err(|error| format!("job {} inválido: {error}", path.display()))
 }
 
+pub fn set_status(workspace: &Path, run_id: &str, status: &str) -> Result<RunJob, String> {
+    let mut job = load(workspace, run_id)?;
+    job.status = status.to_owned();
+    let path = jobs_root(workspace).join(format!("{run_id}.json"));
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&job).map_err(|error| format!("job inválido: {error}"))?,
+    )
+    .map_err(|error| format!("não foi possível atualizar job: {error}"))?;
+    Ok(job)
+}
+
 fn jobs_root(workspace: &Path) -> PathBuf {
     workspace.join(".harness").join("api-runs")
 }

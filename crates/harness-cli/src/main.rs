@@ -12,6 +12,7 @@ mod providers;
 mod schemas;
 mod serve;
 mod state;
+mod worker;
 mod workspace;
 
 use harness_engine::RunState;
