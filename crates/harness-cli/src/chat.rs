@@ -133,24 +133,13 @@ impl ClaudeChatProvider {
                 ));
             }
         };
-        let web_enabled = crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
-            .map(|value| {
-                matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-            .unwrap_or(false);
-        if web_enabled && backend == Backend::Minimax {
-            return Err(
-                "HARNESS_CHAT_WEB=1 exige HARNESS_CHAT_PROVIDER=claude; o MiniMax não suporta as ferramentas web do Claude CLI".to_owned(),
-            );
-        }
         Ok(Self {
             binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
             backend,
             model: resolve_model(workspace, backend, None, true),
-            web_enabled,
+            // Web research is performed by the Harness and injected into the
+            // prompt, so every model receives the same provider-neutral context.
+            web_enabled: false,
             max_tool_calls: crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
                 .and_then(|value| value.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
@@ -760,7 +749,27 @@ pub fn send_message_with_events(
     session.provider = provider.provider_name().to_owned();
     session.model = provider.model().map(str::to_owned);
     save_session(workspace, session)?;
-    let prompt = build_prompt(&session.messages);
+    let mut prompt = build_prompt(&session.messages);
+    if crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+        && crate::web::requested(message)
+    {
+        on_event(ChatEvent::Progress("Pesquisando na web…".to_owned()));
+        let context = crate::web::search(message)?;
+        on_event(ChatEvent::Progress(
+            "Pesquisa concluída; analisando fontes…".to_owned(),
+        ));
+        prompt.push_str("\n\n[CONTEXTO DE PESQUISA WEB DO HARNESS]\n");
+        prompt.push_str(&context);
+        prompt
+            .push_str("\n[FIM DO CONTEXTO WEB]\nUse as fontes acima e cite as URLs na resposta.\n");
+    }
     let reply = provider.send(workspace, &prompt, on_event)?;
     session.messages.push(ChatMessage {
         role: "assistant".to_owned(),

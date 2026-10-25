@@ -12,6 +12,7 @@ mod providers;
 mod schemas;
 mod serve;
 mod state;
+mod web;
 mod worker;
 mod workspace;
 
