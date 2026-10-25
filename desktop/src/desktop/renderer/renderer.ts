@@ -370,12 +370,12 @@ function escapeHtml(value: string): string {
 }
 
 function firstLine(text: string): string {
-  return (
-    text
-      .split('\n')
-      .find((line) => line.trim() !== '')
-      ?.trim() ?? ''
-  );
+  const line = text
+    .replace(/\\n/g, '\n')
+    .split('\n')
+    .find((value) => value.trim() !== '')
+    ?.trim() ?? '';
+  return line.length > 140 ? `${line.slice(0, 137)}…` : line;
 }
 
 /**

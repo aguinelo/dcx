@@ -488,6 +488,7 @@ button {
 .chat__scroll {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 .thread {
@@ -497,6 +498,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .msg {
@@ -524,6 +527,9 @@ button {
   color: var(--muted);
   cursor: pointer;
   padding: 3px 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .activity:hover {
   color: var(--text);
@@ -531,6 +537,13 @@ button {
 .activity__glyph {
   width: 14px;
   text-align: center;
+  flex: none;
+}
+.activity > span:not(.activity__glyph) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .activity--ok .activity__glyph {
   color: var(--ok);
@@ -545,6 +558,10 @@ button {
   color: var(--faint);
   font-size: var(--fs-body-sm);
   line-height: var(--lh-body-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .thinking {
