@@ -14,15 +14,17 @@ pub fn load_for_workspace(workspace: &Path) -> Result<(), String> {
     load_optional(&workspace.join(".env"))
 }
 
-pub fn api_key(workspace: &Path) -> Option<String> {
-    let path = environment_path(workspace)?;
-    let entries = dotenvy::from_path_iter(&path).ok()?;
-    for entry in entries.flatten() {
-        if entry.0 == "ANTHROPIC_API_KEY" {
-            return Some(entry.1);
+pub fn value(workspace: &Path, name: &str) -> Option<String> {
+    if let Some(path) = environment_path(workspace) {
+        if let Ok(entries) = dotenvy::from_path_iter(&path) {
+            for entry in entries.flatten() {
+                if entry.0 == name {
+                    return Some(entry.1);
+                }
+            }
         }
     }
-    None
+    std::env::var(name).ok()
 }
 
 fn environment_path(workspace: &Path) -> Option<PathBuf> {

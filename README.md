@@ -34,7 +34,9 @@ cargo run -p harness-cli -- schemas --write
 
 `harness run --demo` exercises a deterministic smoke path with a built-in worker and acceptance sensors. It does not call a model provider or provide an OS security sandbox, so it is not an evaluation of the MVP thesis and must not be used with untrusted code. `harness run --pilot` uses the installed Codex CLI for the executor and verifier; it applies the CLI's workspace-write and read-only sandbox modes.
 
-The harness supports two local model providers behind the same role interfaces: `codex` (default) and `claude`. Select one with `HARNESS_PROVIDER=claude`, or use `HARNESS_PROVIDER=auto` to try Claude first and fall back to Codex; each role uses its own CLI sandbox or permission mode.
+The harness supports three providers behind the same role interfaces: `codex` (default), `claude`, and `minimax`. Select one with `HARNESS_PROVIDER=claude` or `HARNESS_PROVIDER=minimax`; `HARNESS_PROVIDER=auto` tries Claude first and falls back to Codex. Each role keeps its own CLI sandbox or permission mode.
+
+MiniMax uses its Anthropic-compatible endpoint through the installed Claude CLI, so the same read-only and workspace-write permission modes apply. Configure `MINIMAX_API_KEY` and, optionally, `HARNESS_MINIMAX_MODEL` (default `MiniMax-M3`) and `HARNESS_MINIMAX_BASE_URL` (default `https://api.minimax.io/anthropic`; use `https://api.minimax.cn/anthropic` in China). The `.env.example` file documents every variable.
 
 The engine derives `step_report.files_changed` from workspace snapshots around each executor attempt, instead of trusting the executor's own list. Snapshots skip symlinks and enforce 16 MiB per file and 64 MiB per workspace limits.
 
@@ -66,7 +68,7 @@ Start a free conversation about the current project, without a contract, sensors
 cargo run -p harness-cli -- chat
 ```
 
-The chat keeps a persistent session under `.harness/sessions/<session_id>/session.json`, streams the assistant response, and uses Claude in plan mode with only `Read`, `Glob`, and `Grep`; `Bash`, `Edit`, `Write`, and `NotebookEdit` are explicitly denied. It can discuss architecture and inspect files, but it cannot change the project. Use `/help`, `/session`, and `/exit` inside the chat.
+The chat keeps a persistent session under `.harness/sessions/<session_id>/session.json`, streams the assistant response, and uses the Claude CLI in plan mode with only `Read`, `Glob`, and `Grep`; `Bash`, `Edit`, `Write`, and `NotebookEdit` are explicitly denied. It can discuss architecture and inspect files, but it cannot change the project. Use `/help`, `/session`, and `/exit` inside the chat.
 
 Resume a session or list the project's sessions:
 
@@ -75,14 +77,14 @@ cargo run -p harness-cli -- chat --session <session_id>
 cargo run -p harness-cli -- chat --list
 ```
 
-Use `--workspace <dir>` to point at another project. `HARNESS_CHAT_MODEL` (or `HARNESS_CLAUDE_MODEL`) selects the model, and `HARNESS_CLAUDE_BIN` overrides the Claude executable. To implement something discussed in the chat, start a `run --request`; the chat itself is intentionally read-only.
+Use `--workspace <dir>` to point at another project. `HARNESS_CHAT_PROVIDER=minimax` switches the chat to MiniMax 3; if it is omitted, `HARNESS_PROVIDER=minimax` also selects MiniMax. `HARNESS_CHAT_MODEL` overrides the model for either provider; otherwise use `HARNESS_CLAUDE_MODEL` or `HARNESS_MINIMAX_MODEL`. `HARNESS_CLAUDE_BIN` overrides the Claude executable. To implement something discussed in the chat, start a `run --request`; the chat itself is intentionally read-only.
 
 `harness run --job-02` is the adversarial benchmark: a shortcut passes the visible step but fails the hidden sensors in the integration step. The roadmap for all rounds is in `docs/roadmap.md`.
 
-Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. With Codex, each falls back to `HARNESS_CODEX_MODEL` or the CLI default; with Claude, to `HARNESS_CLAUDE_MODEL` or the CLI default. Set `HARNESS_CLAUDE_BIN` to override the Claude executable.
+Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. With Codex, each falls back to `HARNESS_CODEX_MODEL` or the CLI default; with Claude, to `HARNESS_CLAUDE_MODEL`; with MiniMax, to `HARNESS_MINIMAX_MODEL` or `MiniMax-M3`. Set `HARNESS_CLAUDE_BIN` to override the Claude executable.
 
 ## Ambiente e segredos
 
-`harness` carrega `.env` do diretório atual antes de ler a configuração; `harness chat --workspace <dir>` também carrega o `.env` daquele projeto. Use `HARNESS_ENV_FILE=<arquivo>` para apontar outro arquivo explicitamente. A `ANTHROPIC_API_KEY` encontrada no `.env` é aplicada diretamente ao processo do Claude, então ela funciona mesmo se houver uma chave antiga exportada no shell; as demais variáveis seguem a precedência normal do shell sobre o arquivo.
+`harness` carrega `.env` do diretório atual antes de ler a configuração; `harness chat --workspace <dir>` também carrega o `.env` daquele projeto. Use `HARNESS_ENV_FILE=<arquivo>` para apontar outro arquivo explicitamente. As chaves e configurações de provider lidas do `.env` são aplicadas diretamente aos processos do Claude/MiniMax, então não precisam ser exportadas no shell.
 
-O `.env` é ignorado pelo Git, não é copiado para o workspace isolado de um run e não pode ser aplicado de volta pelo merge gate, então chaves como `ANTHROPIC_API_KEY` podem ficar nele sem serem enviadas ao executor. `.env.example` continua versionável.
+O `.env` é ignorado pelo Git, não é copiado para o workspace isolado de um run e não pode ser aplicado de volta pelo merge gate, então chaves como `ANTHROPIC_API_KEY` e `MINIMAX_API_KEY` podem ficar nele sem serem enviadas ao executor. O `.env.example` versionado documenta os providers, modelos e chaves.

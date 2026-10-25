@@ -8,6 +8,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::claude::{Backend, configure_backend, resolve_model};
+
 const SESSION_SCHEMA_VERSION: u32 = 1;
 const MAX_HISTORY_MESSAGES: usize = 40;
 const MAX_HISTORY_CHARS: usize = 48_000;
@@ -61,17 +63,40 @@ pub trait ChatProvider {
 
 pub struct ClaudeChatProvider {
     binary: OsString,
+    backend: Backend,
     model: Option<String>,
 }
 
 impl ClaudeChatProvider {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(workspace: &Path) -> Result<Self, String> {
+        let provider = crate::env_file::value(workspace, "HARNESS_CHAT_PROVIDER")
+            .or_else(
+                || match crate::env_file::value(workspace, "HARNESS_PROVIDER").as_deref() {
+                    Some("claude") => Some("claude".to_owned()),
+                    Some("minimax") => Some("minimax".to_owned()),
+                    _ => None,
+                },
+            )
+            .unwrap_or_else(|| "claude".to_owned())
+            .to_ascii_lowercase();
+        let backend = match provider.as_str() {
+            "claude" => Backend::Anthropic,
+            "minimax" => Backend::Minimax,
+            other => {
+                return Err(format!(
+                    "HARNESS_CHAT_PROVIDER desconhecido: {other}; use claude ou minimax"
+                ));
+            }
+        };
+        Ok(Self {
             binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
-            model: std::env::var("HARNESS_CHAT_MODEL")
-                .ok()
-                .or_else(|| std::env::var("HARNESS_CLAUDE_MODEL").ok()),
-        }
+            backend,
+            model: resolve_model(workspace, backend, None, true),
+        })
+    }
+
+    pub fn provider_name(&self) -> &'static str {
+        self.backend.provider_name()
     }
 
     pub fn model(&self) -> Option<&str> {
@@ -109,9 +134,7 @@ impl ChatProvider for ClaudeChatProvider {
         if let Some(model) = &self.model {
             command.args(["--model", model]);
         }
-        if let Some(key) = crate::env_file::api_key(workspace) {
-            command.env("ANTHROPIC_API_KEY", key);
-        }
+        configure_backend(&mut command, workspace, self.backend, self.model.as_deref())?;
         command.arg(prompt);
 
         let started = Instant::now();
@@ -305,10 +328,10 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
         Some(session_id) => load_session(&workspace, &session_id)?,
         None => new_session(&workspace)?,
     };
-    let mut provider = ClaudeChatProvider::new();
+    let mut provider = ClaudeChatProvider::new(&workspace)?;
     session.workspace = workspace.clone();
     session.mode = "explore".to_owned();
-    session.provider = "claude".to_owned();
+    session.provider = provider.provider_name().to_owned();
     session.model = provider.model().map(str::to_owned);
     save_session(&workspace, &mut session)?;
 

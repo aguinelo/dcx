@@ -22,18 +22,96 @@ enum Mode {
     WorkspaceWrite,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Backend {
+    Anthropic,
+    Minimax,
+}
+
+impl Backend {
+    pub(crate) fn provider_name(self) -> &'static str {
+        match self {
+            Self::Anthropic => "claude",
+            Self::Minimax => "minimax",
+        }
+    }
+}
+
+pub(crate) fn resolve_model(
+    workspace: &Path,
+    backend: Backend,
+    model_env: Option<&str>,
+    chat: bool,
+) -> Option<String> {
+    if chat {
+        if let Some(model) = crate::env_file::value(workspace, "HARNESS_CHAT_MODEL") {
+            return Some(model);
+        }
+    }
+    if let Some(name) = model_env {
+        if let Some(model) = crate::env_file::value(workspace, name) {
+            return Some(model);
+        }
+    }
+    match backend {
+        Backend::Anthropic => crate::env_file::value(workspace, "HARNESS_CLAUDE_MODEL"),
+        Backend::Minimax => crate::env_file::value(workspace, "HARNESS_MINIMAX_MODEL")
+            .or_else(|| Some("MiniMax-M3".to_owned())),
+    }
+}
+
+pub(crate) fn configure_backend(
+    command: &mut Command,
+    workspace: &Path,
+    backend: Backend,
+    model: Option<&str>,
+) -> Result<(), String> {
+    match backend {
+        Backend::Anthropic => {
+            if let Some(key) = crate::env_file::value(workspace, "ANTHROPIC_API_KEY") {
+                command.env("ANTHROPIC_API_KEY", key);
+            }
+        }
+        Backend::Minimax => {
+            let key = crate::env_file::value(workspace, "MINIMAX_API_KEY")
+                .or_else(|| crate::env_file::value(workspace, "HARNESS_MINIMAX_API_KEY"))
+                .ok_or_else(|| {
+                    "MINIMAX_API_KEY não definida; configure no .env ou no ambiente".to_owned()
+                })?;
+            let base = crate::env_file::value(workspace, "HARNESS_MINIMAX_BASE_URL")
+                .unwrap_or_else(|| "https://api.minimax.io/anthropic".to_owned());
+            let model = model.unwrap_or("MiniMax-M3");
+            command
+                .env_remove("ANTHROPIC_API_KEY")
+                .env("ANTHROPIC_BASE_URL", base)
+                .env("ANTHROPIC_AUTH_TOKEN", key)
+                .env("ANTHROPIC_MODEL", model)
+                .env("ANTHROPIC_SMALL_FAST_MODEL", model);
+        }
+    }
+    Ok(())
+}
+
 struct ClaudeCli {
     binary: OsString,
-    model: Option<String>,
+    backend: Backend,
+    model_env: Option<String>,
 }
 
 impl ClaudeCli {
     fn new(model_env: Option<&str>) -> Self {
         Self {
             binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
-            model: model_env
-                .and_then(|name| std::env::var(name).ok())
-                .or_else(|| std::env::var("HARNESS_CLAUDE_MODEL").ok()),
+            backend: Backend::Anthropic,
+            model_env: model_env.map(str::to_owned),
+        }
+    }
+
+    fn minimax(model_env: Option<&str>) -> Self {
+        Self {
+            binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
+            backend: Backend::Minimax,
+            model_env: model_env.map(str::to_owned),
         }
     }
 
@@ -70,12 +148,11 @@ impl ClaudeCli {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(model) = &self.model {
+        let model = resolve_model(workspace, self.backend, self.model_env.as_deref(), false);
+        if let Some(model) = &model {
             command.args(["--model", model]);
         }
-        if let Some(key) = crate::env_file::api_key(workspace) {
-            command.env("ANTHROPIC_API_KEY", key);
-        }
+        configure_backend(&mut command, workspace, self.backend, model.as_deref())?;
         command.arg(prompt);
 
         let started = Instant::now();
@@ -120,8 +197,8 @@ impl ClaudeCli {
             .map_err(|error| format!("Claude CLI retornou structured_output inválido: {error}"))?;
         metrics::record(CallMetric {
             role: metrics::role_for_schema(schema_name),
-            provider: "claude".to_owned(),
-            model: self.model.clone(),
+            provider: self.backend.provider_name().to_owned(),
+            model,
             duration_ms: started.elapsed().as_millis(),
             cost_usd: envelope["total_cost_usd"].as_f64(),
             input_tokens: envelope["usage"]["input_tokens"].as_u64(),
@@ -139,6 +216,12 @@ impl ClaudeCliAnalyst {
     pub fn new(model_env: &str) -> Self {
         Self {
             cli: ClaudeCli::new(Some(model_env)),
+        }
+    }
+
+    pub fn minimax(model_env: &str) -> Self {
+        Self {
+            cli: ClaudeCli::minimax(Some(model_env)),
         }
     }
 }
@@ -195,6 +278,12 @@ impl ClaudeCliAcceptanceAuthor {
             cli: ClaudeCli::new(Some(model_env)),
         }
     }
+
+    pub fn minimax(model_env: &str) -> Self {
+        Self {
+            cli: ClaudeCli::minimax(Some(model_env)),
+        }
+    }
 }
 
 impl AcceptanceAuthor for ClaudeCliAcceptanceAuthor {
@@ -226,6 +315,12 @@ impl ClaudeCliPlanner {
             cli: ClaudeCli::new(Some(model_env)),
         }
     }
+
+    pub fn minimax(model_env: &str) -> Self {
+        Self {
+            cli: ClaudeCli::minimax(Some(model_env)),
+        }
+    }
 }
 
 impl Planner for ClaudeCliPlanner {
@@ -249,6 +344,12 @@ impl ClaudeCliExecutor {
     pub fn new() -> Self {
         Self {
             cli: ClaudeCli::new(None),
+        }
+    }
+
+    pub fn minimax() -> Self {
+        Self {
+            cli: ClaudeCli::minimax(None),
         }
     }
 }
@@ -277,6 +378,12 @@ impl ClaudeCliVerifier {
     pub fn new(model_env: &str) -> Self {
         Self {
             cli: ClaudeCli::new(Some(model_env)),
+        }
+    }
+
+    pub fn minimax(model_env: &str) -> Self {
+        Self {
+            cli: ClaudeCli::minimax(Some(model_env)),
         }
     }
 }

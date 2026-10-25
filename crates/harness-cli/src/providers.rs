@@ -105,23 +105,28 @@ impl Planner for CodexCliPlanner {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Provider {
     Codex,
     Claude,
+    Minimax,
     Auto,
 }
 
 fn selected() -> Result<Provider, String> {
-    match std::env::var("HARNESS_PROVIDER")
-        .unwrap_or_else(|_| "codex".to_owned())
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    let value = crate::env_file::value(Path::new("."), "HARNESS_PROVIDER")
+        .unwrap_or_else(|| "codex".to_owned());
+    parse_provider(&value)
+}
+
+fn parse_provider(value: &str) -> Result<Provider, String> {
+    match value.to_ascii_lowercase().as_str() {
         "codex" => Ok(Provider::Codex),
         "claude" => Ok(Provider::Claude),
+        "minimax" => Ok(Provider::Minimax),
         "auto" => Ok(Provider::Auto),
         other => Err(format!(
-            "HARNESS_PROVIDER desconhecido: {other}; use codex, claude ou auto"
+            "HARNESS_PROVIDER desconhecido: {other}; use codex, claude, minimax ou auto"
         )),
     }
 }
@@ -130,6 +135,7 @@ pub fn analyst() -> Result<Box<dyn Analyst>, String> {
     Ok(match selected()? {
         Provider::Codex => Box::new(CodexCliAnalyst::default()),
         Provider::Claude => Box::new(ClaudeCliAnalyst::new("HARNESS_ANALYST_MODEL")),
+        Provider::Minimax => Box::new(ClaudeCliAnalyst::minimax("HARNESS_ANALYST_MODEL")),
         Provider::Auto => Box::new(FallbackAnalyst {
             primary: Box::new(ClaudeCliAnalyst::new("HARNESS_ANALYST_MODEL")),
             fallback: Box::new(CodexCliAnalyst::default()),
@@ -141,6 +147,9 @@ pub fn acceptance_author() -> Result<Box<dyn AcceptanceAuthor>, String> {
     Ok(match selected()? {
         Provider::Codex => Box::new(CodexCliAcceptanceAuthor::default()),
         Provider::Claude => Box::new(ClaudeCliAcceptanceAuthor::new("HARNESS_ACCEPTANCE_MODEL")),
+        Provider::Minimax => Box::new(ClaudeCliAcceptanceAuthor::minimax(
+            "HARNESS_ACCEPTANCE_MODEL",
+        )),
         Provider::Auto => Box::new(FallbackAcceptanceAuthor {
             primary: Box::new(ClaudeCliAcceptanceAuthor::new("HARNESS_ACCEPTANCE_MODEL")),
             fallback: Box::new(CodexCliAcceptanceAuthor::default()),
@@ -152,6 +161,7 @@ pub fn planner() -> Result<Box<dyn Planner>, String> {
     Ok(match selected()? {
         Provider::Codex => Box::new(CodexCliPlanner::default()),
         Provider::Claude => Box::new(ClaudeCliPlanner::new("HARNESS_PLANNER_MODEL")),
+        Provider::Minimax => Box::new(ClaudeCliPlanner::minimax("HARNESS_PLANNER_MODEL")),
         Provider::Auto => Box::new(FallbackPlanner {
             primary: Box::new(ClaudeCliPlanner::new("HARNESS_PLANNER_MODEL")),
             fallback: Box::new(CodexCliPlanner::default()),
@@ -163,6 +173,7 @@ pub fn executor() -> Result<Box<dyn Executor>, String> {
     Ok(match selected()? {
         Provider::Codex => Box::new(CodexCliExecutor::default()),
         Provider::Claude => Box::new(ClaudeCliExecutor::new()),
+        Provider::Minimax => Box::new(ClaudeCliExecutor::minimax()),
         Provider::Auto => Box::new(FallbackExecutor {
             primary: Box::new(ClaudeCliExecutor::new()),
             fallback: Box::new(CodexCliExecutor::default()),
@@ -174,6 +185,7 @@ pub fn verifier() -> Result<Box<dyn Verifier>, String> {
     Ok(match selected()? {
         Provider::Codex => Box::new(CodexCliVerifier::default()),
         Provider::Claude => Box::new(ClaudeCliVerifier::new("HARNESS_VERIFIER_MODEL")),
+        Provider::Minimax => Box::new(ClaudeCliVerifier::minimax("HARNESS_VERIFIER_MODEL")),
         Provider::Auto => Box::new(FallbackVerifier {
             primary: Box::new(ClaudeCliVerifier::new("HARNESS_VERIFIER_MODEL")),
             fallback: Box::new(CodexCliVerifier::default()),
@@ -330,7 +342,7 @@ impl Verifier for FallbackVerifier {
 
 #[cfg(test)]
 mod tests {
-    use super::try_fallback;
+    use super::*;
 
     #[test]
     fn fallback_runs_after_a_primary_error() {
@@ -351,5 +363,22 @@ mod tests {
         let error = result.expect_err("ambos falharam");
         assert!(error.contains("quota"));
         assert!(error.contains("offline"));
+    }
+
+    #[test]
+    fn parses_minimax_provider() {
+        assert_eq!(
+            parse_provider("minimax").expect("provider"),
+            Provider::Minimax
+        );
+        assert_eq!(
+            parse_provider("MiniMax").expect("provider"),
+            Provider::Minimax
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_provider() {
+        assert!(parse_provider("other").is_err());
     }
 }

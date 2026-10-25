@@ -41,6 +41,18 @@ api_key_log = os.environ.get("HARNESS_FAKE_CHAT_API_KEY_LOG")
 if api_key_log:
     with open(api_key_log, "w", encoding="utf-8") as handle:
         handle.write(os.environ.get("ANTHROPIC_API_KEY", ""))
+env_log = os.environ.get("HARNESS_FAKE_CHAT_ENV_LOG")
+if env_log:
+    keys = [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+    ]
+    with open(env_log, "w", encoding="utf-8") as handle:
+        for key in keys:
+            handle.write("%s=%s\n" % (key, os.environ.get(key, "")))
 counter_path = os.environ["HARNESS_FAKE_CHAT_COUNTER"]
 try:
     with open(counter_path, encoding="utf-8") as handle:
@@ -81,6 +93,7 @@ fn run_chat_with_env(
     let prompt_log = project.join("fake-prompts.log");
     let args_log = project.join("fake-args.log");
     let api_key_log = project.join("fake-api-key.log");
+    let env_log = project.join("fake-env.log");
     let mut command = Command::new(env!("CARGO_BIN_EXE_harness"));
     command
         .args(args)
@@ -90,6 +103,7 @@ fn run_chat_with_env(
         .env("HARNESS_FAKE_CHAT_LOG", &prompt_log)
         .env("HARNESS_FAKE_CHAT_ARGS", &args_log)
         .env("HARNESS_FAKE_CHAT_API_KEY_LOG", &api_key_log)
+        .env("HARNESS_FAKE_CHAT_ENV_LOG", &env_log)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -289,4 +303,46 @@ fn chat_prefers_the_dotenv_api_key_over_a_shell_value() {
         fs::read_to_string(project.join("fake-api-key.log")).expect("chave registrada"),
         "from-dotenv"
     );
+}
+
+#[test]
+fn chat_uses_the_minimax_anthropic_compatible_endpoint() {
+    let project = unique_dir("chat-minimax");
+    fs::write(
+        project.join(".env"),
+        "HARNESS_CHAT_PROVIDER=minimax\n\
+         MINIMAX_API_KEY=minimax-key\n\
+         HARNESS_MINIMAX_BASE_URL=https://api.minimax.io/anthropic\n\
+         HARNESS_MINIMAX_MODEL=MiniMax-M3\n",
+    )
+    .expect(".env");
+    let fake = write_fake_claude(&project);
+
+    let output = run_chat_with_env(
+        &project,
+        &["chat"],
+        "olá\n/exit\n",
+        &fake,
+        &[("ANTHROPIC_API_KEY", "from-shell")],
+    );
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let envs = fs::read_to_string(project.join("fake-env.log")).expect("env do MiniMax");
+    assert!(envs.contains("ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic"));
+    assert!(envs.contains("ANTHROPIC_AUTH_TOKEN=minimax-key"));
+    assert!(envs.contains("ANTHROPIC_API_KEY=\n"));
+    assert!(envs.contains("ANTHROPIC_MODEL=MiniMax-M3"));
+    assert!(envs.contains("ANTHROPIC_SMALL_FAST_MODEL=MiniMax-M3"));
+
+    let args = fs::read_to_string(project.join("fake-args.log")).expect("args");
+    assert!(args.lines().any(|line| line == "MiniMax-M3"));
+
+    let (_, session) = only_session(&project);
+    assert_eq!(session["provider"], "minimax");
+    assert_eq!(session["model"], "MiniMax-M3");
 }
