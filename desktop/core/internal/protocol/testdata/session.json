@@ -1,0 +1,12 @@
+{
+  "id": "s-1",
+  "state": "idle",
+  "workspace": "/w",
+  "model": "MiniMax-M3",
+  "sandbox_mode": "workspace-write",
+  "mode": "",
+  "created_at": "2026-08-11T12:00:00Z",
+  "last_seq": 0,
+  "context_window": 1000000,
+  "done_criteria": 0
+}

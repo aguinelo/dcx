@@ -8,3 +8,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Desktop adapter generated files
+desktop/node_modules/
+desktop/dist/

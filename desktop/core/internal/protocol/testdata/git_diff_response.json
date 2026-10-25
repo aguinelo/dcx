@@ -1,0 +1,8 @@
+{
+  "path": "a.txt",
+  "status": "modified",
+  "diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-two\n+TWO\n",
+  "binary": false,
+  "truncated": true,
+  "limit": 262144
+}

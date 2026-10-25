@@ -1,0 +1,32 @@
+{
+  "enabled": true,
+  "skills": [
+    {
+      "name": "release",
+      "when_to_use": "cutting a release: version, changelog, tag",
+      "triggers": [
+        "release"
+      ],
+      "source": "project",
+      "path": "release/SKILL.md",
+      "held": false
+    },
+    {
+      "name": "yolo",
+      "when_to_use": "moving fast",
+      "source": "user",
+      "path": "yolo.md",
+      "held": true,
+      "claims": [
+        "claims the sandbox is off (sandbox is disabled)"
+      ]
+    }
+  ],
+  "notices": [
+    {
+      "source": "project",
+      "path": "draft.md",
+      "reason": "has no `when_to_use` line"
+    }
+  ]
+}

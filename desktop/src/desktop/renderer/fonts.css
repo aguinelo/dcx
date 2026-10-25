@@ -1,0 +1,48 @@
+/*
+ * Font faces for the renderer.
+ *
+ * Claude's real faces are proprietary (BSPK LLC / Anthropic) and ship from
+ * Anthropic's CDN. We do not vendor them. Instead every stack below lists the
+ * real family first, so dropping the licensed files into ./fonts/ under those
+ * names is all it takes to get an exact match. Until then we fall back to free
+ * faces picked for glyph lineage, not vibes:
+ *
+ *   anthropic-sans   -> Geist
+ *     Anthropic Sans is drawn by BSPK, whose own name table reads
+ *     "BSPK x Geist x Anthropic". Geist is the parent, so it is the closest
+ *     freely-licensed stand-in rather than a lookalike guess.
+ *
+ *   anthropic-serif  -> Source Serif 4
+ *     Anthropic Serif is the current name for the face Anthropic has shipped
+ *     since the 2024 redesign (Tiempos Text -> Galaxie Copernicus line). Source
+ *     Serif 4 sits in the same transitional-serif slot at a comparable x-height.
+ *
+ *   anthropic-mono   -> JetBrains Mono
+ *     Matches Claude's own stated replacement for its previous fixed face.
+ *
+ * All three substitutes are SIL Open Font License 1.1.
+ */
+
+@font-face {
+  font-family: "Geist";
+  src: url("./fonts/geist-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("./fonts/source-serif-4-latin.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/jetbrains-mono-latin.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}

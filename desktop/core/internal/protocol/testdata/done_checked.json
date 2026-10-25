@@ -1,0 +1,23 @@
+{
+  "turn_id": "t1",
+  "cycle": 3,
+  "met": [
+    "lint",
+    "unit"
+  ],
+  "unmet": [
+    "e2e"
+  ],
+  "unavailable": [
+    "a11y"
+  ],
+  "moved": "backward",
+  "stall": 1,
+  "stall_limit": 3,
+  "undone": [
+    "src/cart.ts"
+  ],
+  "touched_protected": [
+    "cart_test.go"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "@repl/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Adaptador de desktop do Harness: interface de tres colunas (Electron), renderer sem logica de agente nem estado duravel.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.renderer.build.json && node tools/copy-assets.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.renderer.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "node --import tsx --test 'tests/**/*.test.ts'",
+    "gen:protocol": "cd core && go run github.com/gzuidhof/tygo@v0.2.21 generate --config tygo.yaml",
+    "check:protocol": "pnpm gen:protocol && { git diff --exit-code -- src/desktop/protocol/generated.ts || { echo 'src/desktop/protocol/generated.ts esta velho: rode pnpm gen:protocol'; exit 1; }; }",
+    "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm gate:core",
+    "gate:core": "(cd core && go test ./...)",
+    "desktop": "pnpm build && electron dist/desktop/main.js"
+  },
+  "dependencies": {
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.5",
+    "electron": "^45.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "main": "dist/desktop/main.js"
+}

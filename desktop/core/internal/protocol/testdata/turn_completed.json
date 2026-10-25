@@ -1,0 +1,18 @@
+{
+  "turn_id": "t-1",
+  "reason": "done",
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 20,
+    "cache_read_tokens": 80
+  },
+  "completion": {
+    "verification": "passed",
+    "met": [
+      "tests"
+    ],
+    "touched_protected": [
+      "a_test.go"
+    ]
+  }
+}

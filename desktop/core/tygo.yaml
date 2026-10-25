@@ -1,0 +1,19 @@
+# The protocol types, generated from core/internal/protocol into the desktop.
+#
+# The dependency runs one way: the desktop reads the core, the core never
+# reads the desktop. Run from the core directory (`pnpm gen:protocol` does
+# that), so the package resolves inside the core's own module and nothing is
+# added to the root go.mod. CI regenerates and fails when the committed file
+# differs.
+#
+# `output_path` is relative to where tygo runs — the core directory — so the
+# generated file lands in the desktop's tree at the repo root.
+packages:
+  - path: github.com/aguinelo/claudecodeclone/core/internal/protocol
+    output_path: ../src/desktop/protocol/generated.ts
+    type_mappings:
+      time.Time: string
+      json.RawMessage: unknown
+    frontmatter: |
+      // From core/internal/protocol, by `pnpm gen:protocol` (tygo). CI fails
+      // when this file is stale; edit the Go types, never this file.

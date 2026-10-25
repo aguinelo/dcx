@@ -1,0 +1,30 @@
+{
+  "path": ".dcode/memory.md",
+  "exists": true,
+  "enabled": true,
+  "max_entries": 40,
+  "entries": [
+    {
+      "kind": "gotcha",
+      "subject": "make test needs go generate first",
+      "body": "the generated files go stale.",
+      "learned": "2026-08-18",
+      "commit": "abc1234",
+      "stale": false,
+      "shown": true
+    },
+    {
+      "kind": "convention",
+      "subject": "errors carry the path",
+      "commit": "0ddba11",
+      "stale": true,
+      "shown": true
+    }
+  ],
+  "malformed": [
+    {
+      "line": "## diary: what I did today",
+      "reason": "\"diary\" is not a kind of memory; the kinds are gotcha, decision and convention"
+    }
+  ]
+}

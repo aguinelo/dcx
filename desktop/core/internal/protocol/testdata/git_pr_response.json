@@ -1,0 +1,20 @@
+{
+  "branch": "feat/protocol-git-pr",
+  "base": "main",
+  "pr": {
+    "number": 481,
+    "url": "https://github.com/aguinelo/claudecodeclone/pull/481",
+    "title": "feat(protocol): the daemon opens a branch's PR",
+    "state": "open",
+    "draft": false,
+    "base": "main",
+    "head": "feat/protocol-git-pr",
+    "checks": {
+      "state": "pending",
+      "passed": 4,
+      "failed": 0,
+      "pending": 1,
+      "skipped": 1
+    }
+  }
+}

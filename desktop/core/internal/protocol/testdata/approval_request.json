@@ -1,0 +1,11 @@
+{
+  "approval_id": "a-1",
+  "turn_id": "t-1",
+  "tool_call_id": "c-1",
+  "tool": "bash",
+  "command": "rm -rf build",
+  "boundary_crossed": "workspace-write",
+  "expires_at": "2026-08-11T12:00:00Z",
+  "reason": "matches a confirm rule",
+  "rule": "rm -rf*"
+}

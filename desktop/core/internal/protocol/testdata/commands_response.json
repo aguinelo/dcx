@@ -1,0 +1,21 @@
+{
+  "commands": [
+    {
+      "name": "fix-issue",
+      "description": "",
+      "source": "user",
+      "path": "fix-issue.md",
+      "body": "Fix the issue described here: $ARGUMENTS"
+    },
+    {
+      "name": "review",
+      "description": "review the staged change",
+      "source": "project",
+      "path": "review.md",
+      "body": "Review the staged change against AGENTS.md."
+    }
+  ],
+  "overrides": [
+    "review"
+  ]
+}

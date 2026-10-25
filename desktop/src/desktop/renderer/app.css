@@ -1,0 +1,1689 @@
+/*
+ * Design tokens for the Claude Desktop clone.
+ *
+ * Colour and metrics were estimated from a screenshot. Typography was not —
+ * those values below were read out of claude.ai's own compiled CSS
+ * (--cds-* tokens, `data-density="comfortable"`, root 1rem = 16px), so the
+ * sizes and weights here are the real ones rather than guesses.
+ */
+:root {
+  /* ── Typography ────────────────────────────────────────────────
+   * Claude ships two families and splits them by role: the sans carries
+   * the interface and the user's own messages, the serif ("voice") carries
+   * Claude's replies. That split is the single most recognisable trait of
+   * the UI, so it is modelled explicitly instead of falling out of a global
+   * font-family.
+   *
+   * Real family first, free stand-in second — see fonts.css for why these
+   * particular substitutes.
+   */
+  --font-sans: "Anthropic Sans", "anthropic-sans", "Geist", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-voice: "Anthropic Serif", "anthropic-serif", "Source Serif 4", Georgia, "Times New Roman",
+    serif;
+  --font-mono: "Anthropic Mono", "anthropic-mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo,
+    monospace;
+
+  /* Size scale, comfortable density. rem values from claude.ai. */
+  --fs-body: 14px; /* .875rem  -- font-size-body--textmd */
+  --lh-body: 20px; /* 1.25rem  -- leading-body--textmd */
+  --fs-body-sm: 13px; /* .8125rem -- font-size-body--textsm */
+  --lh-body-sm: 19px; /* 1.1875rem -- leading-body--textsm */
+  --fs-prose: 15px; /* .9375rem -- font-size-prose--textsm */
+  --lh-prose: 22px; /* 1.375rem -- leading-prose--textsm */
+  --fs-caption: 12px; /* font-size-caption--sm */
+  --lh-caption: 17px;
+  --fs-code: 13px; /* font-size-code--lg */
+
+  /* Claude's text entry floor: inputs never render below this, which is
+   * why the composer is 16px even though body text is 14px. */
+  --fs-entry: 16px;
+  --lh-entry: 22px; /* max(1.375em, leading-body) */
+
+  /* Weights are Anthropic's own scale. 580 sits between medium and semibold
+   * and is what makes the UI read as light without looking thin. */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 580;
+  --fw-bold: 600;
+
+  /* ── Colour ───────────────────────────────────────────────────
+   * Every colour in this file resolves through one of the tokens below.
+   * The values on :root are the "dark" theme and are duplicated by the
+   * [data-theme] blocks further down, which exist so each theme is a
+   * complete, self-describing palette rather than a partial override.
+   *
+   * The set is deliberately split into neutrals (bg / text / border) and
+   * signal colours (accent / ok / warn / danger): themes vary both
+   * independently, which is what proves the layout never depends on a
+   * specific hue.
+   */
+
+  /* Neutrals */
+  --bg: #131312;
+  --bg-raised: #1b1b19;
+  --bg-hover: #262624;
+  --bg-hover-strong: #33332f;
+  --surface-subtle: rgb(245 238 228 / 2%);
+  --bubble-user: #2b2b28;
+  --border: rgb(245 238 228 / 7%);
+  --border-strong: rgb(245 238 228 / 13%);
+  --text: #f0eee9;
+  --muted: #9b968e;
+  --faint: #6f6a63;
+
+  /* Signal. Claude's brand clay-orange is the default accent. */
+  --accent: #d97757;
+  --accent-soft: #b35f42;
+  --ok: #7f9b7a;
+  --warn: #c8963e;
+  --danger: #c9645a;
+
+  /* Component-level surfaces that would otherwise be inline literals */
+  --code-bg: rgb(245 238 228 / 7%);
+  --hint-bg: rgb(19 19 18 / 18%);
+  --tok-str: #8fbf7f;
+  --toggle-knob: #ffffff;
+  --scroll-thumb: rgb(245 238 228 / 14%);
+  --scroll-thumb-hover: rgb(245 238 228 / 24%);
+
+  color-scheme: dark;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  /* Layout measures, read from claude.ai's rail tokens rather than eyeballed:
+   * --session-rail-w: 17.5rem, --chat-column-measure: 768px, --chat-gutter: 32px. */
+  --sidebar-w: 280px;
+  --sidebar-edge: 13px; /* --session-rail-edge */
+  --panel-w: 288px;
+  --thread-w: 768px;
+  --gutter: 32px;
+  --terminal-w: 460px;
+  --titlebar-h: 44px;
+}
+
+/* ── Themes ───────────────────────────────────────────────────
+ * A theme is nothing but the colour tokens. Typography, spacing and
+ * layout measures are inherited from :root untouched, so a theme can
+ * never change how the app is laid out — only how it is coloured.
+ */
+
+/* Claude's own light canvas: warm cream, near-black ink, same clay accent. */
+[data-theme="light"] {
+  --bg: #f2f0ea;
+  --bg-raised: #fbfaf6;
+  --bg-hover: #eae7de;
+  --bg-hover-strong: #dedacf;
+  --surface-subtle: rgb(20 19 18 / 3%);
+  --bubble-user: #eceae2;
+  --border: rgb(20 19 18 / 9%);
+  --border-strong: rgb(20 19 18 / 17%);
+  --text: #141413;
+  --muted: #5f5b54;
+  --faint: #8b857c;
+  --accent: #c15f3c;
+  --accent-soft: #a84f31;
+  --ok: #4f7a4a;
+  --warn: #96671f;
+  --danger: #b3453c;
+  --code-bg: rgb(20 19 18 / 6%);
+  --hint-bg: rgb(255 255 255 / 55%);
+  --tok-str: #3f7a3a;
+  --toggle-knob: #ffffff;
+  --scroll-thumb: rgb(20 19 18 / 16%);
+  --scroll-thumb-hover: rgb(20 19 18 / 28%);
+  color-scheme: light;
+}
+
+/* Pure black on a cool neutral ramp, with a blue accent. If the layout is
+ * hue-dependent, this is where it shows. */
+[data-theme="oled"] {
+  --bg: #000000;
+  --bg-raised: #0c0c0e;
+  --bg-hover: #1a1a1d;
+  --bg-hover-strong: #26262a;
+  --surface-subtle: rgb(255 255 255 / 4%);
+  --bubble-user: #17171a;
+  --border: rgb(255 255 255 / 10%);
+  --border-strong: rgb(255 255 255 / 20%);
+  --text: #f5f5f7;
+  --muted: #9b9ba3;
+  --faint: #6c6c74;
+  --accent: #5b8def;
+  --accent-soft: #4470d0;
+  --ok: #4aa564;
+  --warn: #d9a441;
+  --danger: #e05a5a;
+  --code-bg: rgb(255 255 255 / 8%);
+  --hint-bg: rgb(0 0 0 / 30%);
+  --tok-str: #7fd18a;
+  --toggle-knob: #ffffff;
+  --scroll-thumb: rgb(255 255 255 / 18%);
+  --scroll-thumb-hover: rgb(255 255 255 / 30%);
+  color-scheme: dark;
+}
+
+/* Violet-tinted dark. Same lightness ladder as dark, different hue family. */
+[data-theme="dusk"] {
+  --bg: #16151c;
+  --bg-raised: #1e1d26;
+  --bg-hover: #2a2934;
+  --bg-hover-strong: #383645;
+  --surface-subtle: rgb(226 220 255 / 4%);
+  --bubble-user: #24232e;
+  --border: rgb(226 220 255 / 9%);
+  --border-strong: rgb(226 220 255 / 18%);
+  --text: #eceaf5;
+  --muted: #9e9ab0;
+  --faint: #6f6b80;
+  --accent: #a78bfa;
+  --accent-soft: #8b6ee8;
+  --ok: #6fae7f;
+  --warn: #d2a04a;
+  --danger: #e06a72;
+  --code-bg: rgb(226 220 255 / 8%);
+  --hint-bg: rgb(22 21 28 / 40%);
+  --tok-str: #86d9a8;
+  --toggle-knob: #ffffff;
+  --scroll-thumb: rgb(226 220 255 / 16%);
+  --scroll-thumb-hover: rgb(226 220 255 / 28%);
+  color-scheme: dark;
+}
+
+/* Aged paper. A second light theme, warmer and lower-contrast than "light". */
+[data-theme="sepia"] {
+  --bg: #f4ece0;
+  --bg-raised: #fbf6ee;
+  --bg-hover: #e9dfd0;
+  --bg-hover-strong: #ddd0bd;
+  --surface-subtle: rgb(60 40 20 / 4%);
+  --bubble-user: #ece1d2;
+  --border: rgb(60 40 20 / 12%);
+  --border-strong: rgb(60 40 20 / 22%);
+  --text: #2a231a;
+  --muted: #6b5f4f;
+  --faint: #968876;
+  --accent: #a85a2b;
+  --accent-soft: #8c4a22;
+  --ok: #5d7a4e;
+  --warn: #96701f;
+  --danger: #a8453a;
+  --code-bg: rgb(60 40 20 / 7%);
+  --hint-bg: rgb(255 255 255 / 50%);
+  --tok-str: #4a7a3f;
+  --toggle-knob: #ffffff;
+  --scroll-thumb: rgb(60 40 20 / 18%);
+  --scroll-thumb-hover: rgb(60 40 20 / 30%);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fw-regular) var(--fs-body) / var(--lh-body) var(--font-sans);
+  /* Anthropic disables discretionary ligatures on its sans. */
+  font-feature-settings: "dlig" 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.muted {
+  color: var(--muted);
+}
+.faint {
+  color: var(--faint);
+}
+.chev {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+/* ── Title bar ─────────────────────────────────────────────── */
+.titlebar {
+  height: var(--titlebar-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 88px; /* room for the inset traffic lights */
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  -webkit-app-region: drag;
+}
+.titlebar__slot {
+  width: 0;
+}
+.titlebar__nav {
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.titlebar__project {
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.iconbtn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 13px;
+}
+.iconbtn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.project-chip {
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-weight: var(--fw-medium);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.project-chip:hover {
+  background: var(--bg-hover);
+}
+
+/* ── Layout ────────────────────────────────────────────────── */
+
+/* The terminal is a fourth column rather than an overlay: the reference keeps
+   the context panel visible next to it. Zero-width when closed, so the other
+   three columns need no variant of their own. */
+.layout {
+  --term-col: 0px;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w) var(--term-col);
+  height: calc(100% - var(--titlebar-h));
+}
+.layout[data-terminal="open"] {
+  --term-col: var(--terminal-w);
+}
+.layout[data-sidebar="hidden"] {
+  grid-template-columns: 0 minmax(0, 1fr) var(--panel-w) var(--term-col);
+}
+.layout[data-panel="hidden"] {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0 var(--term-col);
+}
+.layout[data-sidebar="hidden"] .sidebar,
+.layout[data-panel="hidden"] .panel,
+.layout[data-terminal="closed"] .terminal {
+  display: none;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────── */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  min-height: 0;
+}
+.sidebar__search {
+  padding: 10px;
+}
+.sidebar__search input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  outline: none;
+}
+.sidebar__search input:focus {
+  border-color: var(--border-strong);
+}
+.sidebar__search input::placeholder {
+  color: var(--faint);
+}
+
+.sidebar__actions {
+  padding: 0 10px 6px;
+}
+.sidebar__nav {
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 1px;
+}
+
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+}
+.navitem:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+  min-height: 0;
+}
+.group {
+  margin-bottom: 14px;
+}
+.group__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 4px;
+  padding: 0 8px;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--faint);
+}
+.group__add {
+  color: var(--faint);
+  font-size: 14px;
+  line-height: 1;
+}
+.group__add:hover {
+  color: var(--text);
+}
+
+.conversations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+.conversations li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.conversations li:hover {
+  background: var(--bg-hover);
+}
+.conversations .warn {
+  color: var(--warn);
+  font-size: 11px;
+}
+.conversations .unread {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: none;
+}
+
+.sidebar__footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.account {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.account:hover {
+  background: var(--bg-hover);
+}
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--bg-hover);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+}
+
+/* ── Chat ──────────────────────────────────────────────────── */
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.chat__scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.thread {
+  max-width: var(--thread-w);
+  margin: 0 auto;
+  padding: 24px var(--gutter) 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg__body {
+  white-space: pre-wrap;
+}
+.msg--user {
+  align-items: flex-end;
+}
+.msg--user .msg__body {
+  background: var(--bubble-user);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  max-width: 85%;
+}
+
+.activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 3px 0;
+}
+.activity:hover {
+  color: var(--text);
+}
+.activity__glyph {
+  width: 14px;
+  text-align: center;
+}
+.activity--ok .activity__glyph {
+  color: var(--ok);
+}
+.activity--error .activity__glyph {
+  color: var(--danger);
+}
+.activity--running .activity__glyph {
+  color: var(--accent);
+}
+.activity__detail {
+  color: var(--faint);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+}
+
+.notice {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  background: var(--bg-raised);
+}
+.notice--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.notice__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--fw-semibold);
+}
+.notice__actions {
+  display: flex;
+  gap: 8px;
+}
+.btn {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+}
+.btn:hover {
+  background: var(--bg-hover);
+}
+.btn--primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+/* ── Composer ──────────────────────────────────────────────── */
+.composer {
+  padding: 8px var(--gutter) 16px;
+}
+.composer__box {
+  max-width: var(--thread-w);
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  padding: 8px 10px;
+}
+.composer__box:focus-within {
+  border-color: var(--border-strong);
+}
+.composer__attach,
+.composer__mic {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+.composer__attach:hover,
+.composer__mic:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Claude clamps every text entry to a 16px floor, so the composer reads
+   larger than the surrounding UI even though the body size is 14px. */
+#input {
+  flex: 1;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: max(var(--fs-entry), var(--fs-body));
+  line-height: var(--lh-entry);
+  font-weight: var(--fw-regular);
+  max-height: 200px;
+  padding: 5px 0;
+}
+#input::placeholder {
+  color: var(--faint);
+}
+
+.composer__meta {
+  max-width: var(--thread-w);
+  margin: 8px auto 0;
+  display: flex;
+  justify-content: space-between;
+}
+.meta-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+}
+.meta-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.dot--danger {
+  background: var(--danger);
+}
+
+.composer__notice {
+  max-width: var(--thread-w);
+  margin: 0 auto 10px;
+}
+
+/* ── Context panel ─────────────────────────────────────────── */
+.panel {
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.panel__section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.panel__section--grow {
+  flex: 1;
+}
+.panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
+}
+.badge {
+  margin-left: auto;
+  font-weight: var(--fw-medium);
+  color: var(--faint);
+  background: var(--bg-raised);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.envlist {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.envlist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.envlist li:hover {
+  background: var(--bg-hover);
+}
+.envlist .glyph {
+  color: var(--faint);
+  width: 14px;
+  flex: none;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  color: var(--text);
+}
+.toggle {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  position: relative;
+  transition: background .15s;
+}
+.toggle[aria-checked="true"] {
+  background: var(--accent);
+}
+.toggle span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--toggle-knob);
+  /* The knob stays white in every theme, so it needs an edge to stay visible
+     against the light canvases. */
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: transform .15s;
+}
+.toggle[aria-checked="true"] span {
+  transform: translateX(14px);
+}
+
+.gauge__row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.gauge__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.gauge__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width .2s;
+}
+.hint {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+}
+
+.changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.change {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.change:last-child {
+  border-bottom: 0;
+}
+.change__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.change__repo {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+}
+.change__stat {
+  display: flex;
+  gap: 6px;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  align-items: center;
+}
+.change__add {
+  color: var(--ok);
+}
+.change__del {
+  color: var(--danger);
+}
+.change__status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-left: auto;
+}
+
+/* ── Mid-thread components ────────────────────────────────────── */
+
+.iconbtn--tiny {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+
+/* Command block. Runs inline, or hands off to the terminal drawer. */
+.cmd {
+  display: grid;
+  gap: 4px;
+}
+.cmd__box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.cmd__prompt {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  line-height: 1.5;
+  flex: none;
+}
+.cmd__code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cmd__actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.tok-str {
+  color: var(--tok-str);
+}
+.tok-cmd {
+  color: var(--accent);
+}
+.cmd__output {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  text-align: left;
+}
+.cmd__output.is-open {
+  color: var(--faint);
+}
+
+/* Question card: body in the reply serif, the ask and the answers in UI sans. */
+.question {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--surface-subtle);
+}
+.question__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.question__close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.question__body {
+  font-family: var(--font-voice);
+  font-size: var(--fs-prose);
+  line-height: var(--lh-prose);
+}
+.question__body > :last-child {
+  margin-bottom: 0;
+}
+.question__ask {
+  margin: 12px 0 10px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-semibold);
+}
+.question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--bg-hover);
+  color: var(--text);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-medium);
+}
+.option:hover {
+  background: var(--bg-hover-strong);
+}
+.option.is-selected {
+  background: var(--text);
+  color: var(--bg);
+}
+.option__hint {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hint-bg);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+/* Checklist card shown while a turn is mid-flight. */
+.steps__list {
+  list-style: none;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 9px;
+}
+.steps__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+.steps__glyph {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  color: var(--faint);
+}
+.steps__item--running .steps__glyph {
+  color: var(--accent);
+  animation: steps-pulse 1.1s ease-in-out infinite;
+}
+.steps__item--done .steps__glyph {
+  color: var(--ok);
+}
+@keyframes steps-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* PR reference and artefact chip. */
+.pr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+.pr__ref {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.artifact {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  color: var(--muted);
+}
+.artifact__badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+.artifact__label {
+  color: var(--text);
+}
+.activity__diff {
+  color: var(--ok);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Embedded terminal ───────────────────────────────────────── */
+
+.terminal {
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.terminal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.terminal__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.terminal__tab {
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+}
+.terminal__tab.is-active {
+  color: var(--text);
+}
+.terminal__body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  line-height: 1.6;
+}
+.term-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.term-line--prompt {
+  color: var(--accent);
+  margin-top: 6px;
+}
+.term-line--output {
+  color: var(--muted);
+}
+.term-line--note {
+  color: var(--faint);
+}
+
+/* ── Theme picker ────────────────────────────────────────────── */
+
+.composer__meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.themes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+/*
+ * The swatch carries its own data-theme, so `var(--bg)` and `var(--accent)`
+ * here resolve against that theme's own block. The dot is therefore always
+ * the palette it represents, with nothing hardcoded a second time.
+ */
+.theme {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--bg) 45%, var(--accent) 45%);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: box-shadow 0.12s;
+}
+.theme:hover {
+  box-shadow: 0 0 0 1px var(--border-strong), 0 0 0 3px var(--surface-subtle);
+}
+.theme.is-active {
+  box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3.5px var(--accent);
+}
+
+/* ── Background tasks ────────────────────────────────────────── */
+
+.panel__title--toggle {
+  cursor: pointer;
+  margin-bottom: 8px;
+  user-select: none;
+}
+.panel__title--toggle:hover {
+  color: var(--text);
+}
+#bg-section.is-collapsed .bgtasks {
+  display: none;
+}
+#bg-section.is-collapsed .panel__title .chev {
+  transform: rotate(-90deg);
+}
+.panel__title .chev {
+  display: inline-block;
+  transition: transform 0.15s;
+}
+
+.bgtasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.bgtask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  color: var(--text);
+}
+.bgtask__glyph {
+  width: 15px;
+  flex: none;
+  text-align: center;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.bgtask__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bgtask__elapsed {
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.bgtask--done {
+  color: var(--muted);
+}
+.bgtask--done .bgtask__glyph {
+  color: var(--faint);
+}
+
+.toggle--sm {
+  width: 26px;
+  height: 15px;
+  flex: none;
+  background: var(--bg-hover);
+}
+.toggle--sm span {
+  width: 11px;
+  height: 11px;
+  top: 2px;
+  left: 2px;
+}
+.toggle--sm[aria-checked="true"] {
+  background: var(--bg-hover);
+}
+.toggle--sm[aria-checked="true"] span {
+  transform: translateX(11px);
+  background: var(--muted);
+}
+
+/* ── Orchestrated run ────────────────────────────────────────── */
+
+/* Stage header: a rule that fills in as the stage resolves. */
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 2px;
+  color: var(--muted);
+}
+.stage__rule {
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+.stage__glyph {
+  font-size: 11px;
+  color: var(--accent);
+  animation: steps-pulse 1.2s ease-in-out infinite;
+}
+.stage__label {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.stage--done {
+  color: var(--muted);
+}
+.stage--done .stage__glyph {
+  animation: none;
+  color: var(--ok);
+}
+
+/* Worktree card: one per fanned-out stage, each with its own subagents. */
+.worktree {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+  overflow: hidden;
+}
+.worktree__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+}
+.worktree__glyph {
+  color: var(--faint);
+  flex: none;
+}
+.worktree__path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree__branch {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+  flex: none;
+}
+.worktree__agents {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  display: grid;
+  gap: 7px;
+}
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+}
+.agent__glyph {
+  width: 13px;
+  flex: none;
+  text-align: center;
+  color: var(--faint);
+}
+.agent__name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  color: var(--text);
+}
+.agent__detail {
+  margin-left: auto;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent--running .agent__glyph {
+  color: var(--accent);
+  animation: steps-pulse 1.1s ease-in-out infinite;
+}
+.agent--running .agent__name {
+  color: var(--text);
+}
+.agent--done .agent__glyph {
+  color: var(--ok);
+}
+.agent--done .agent__detail {
+  color: var(--muted);
+}
+.agent--queued .agent__name,
+.agent--queued .agent__detail {
+  color: var(--faint);
+}
+.agent--failed .agent__glyph {
+  color: var(--danger);
+}
+
+.meta-chip[hidden] {
+  display: none;
+}
+.meta-chip--action {
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+}
+.meta-chip--action:hover {
+  background: var(--bg-hover);
+}
+.meta-chip--stop {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.meta-chip--stop:hover {
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+/* ── Scrollbars ────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+/* Ready state on a pending change. */
+.btn--done {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  cursor: default;
+}
+
+/* ── Convergence pass: matched against a side-by-side of both windows ── */
+
+/*
+ * Typography by role.
+ *
+ * Claude sets its own replies in a serif and everything else — navigation,
+ * labels, buttons, and the user's own messages — in a sans. Getting this
+ * split right does more for the resemblance than any single colour value,
+ * so it is stated once here rather than inherited.
+ */
+button,
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
+}
+
+/* User turns stay in the UI sans, at body size. */
+.msg--user .msg__body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-regular);
+}
+
+/* Claude's replies move to the serif "voice" at prose size.
+   Scoped to a direct child so the notice body keeps the UI sans. */
+.msg:not(.msg--user) > .msg__body {
+  font-family: var(--font-voice);
+  font-size: var(--fs-prose);
+  line-height: var(--lh-prose);
+  font-weight: var(--fw-regular);
+}
+
+/* Code blocks inside a reply follow the prose, in the mono face. */
+.msg:not(.msg--user) > .msg__body code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+}
+
+.notice .msg__body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+/* Title bar: project chip sits with the left cluster, not alone on the right. */
+.titlebar {
+  padding: 0 12px 0 88px;
+  gap: 0;
+}
+.titlebar__left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.titlebar__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Sidebar: navigation rows only — the search box is gone. */
+.sidebar__nav {
+  display: grid;
+  gap: 1px;
+  padding: 10px var(--sidebar-edge) 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar__scroll {
+  padding: 8px var(--sidebar-edge) 12px;
+}
+.navitem {
+  padding: 6px 8px;
+}
+.navitem .glyph {
+  width: 16px;
+  color: var(--muted);
+  flex: none;
+  text-align: center;
+}
+.navitem--strong .glyph {
+  color: var(--text);
+}
+
+/* Conversation rows carry a code glyph and an explicit active state. */
+.conversations li {
+  padding: 6px 8px;
+  gap: 8px;
+}
+.conversations li .glyph {
+  color: var(--faint);
+  flex: none;
+  font-size: 12px;
+}
+.conversations li.is-active {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.conversations .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Group header keeps its chevron. */
+.group__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* User turns are indented blocks, not right-aligned bubbles. */
+.msg--user {
+  align-items: stretch;
+}
+.msg--user .msg__body {
+  max-width: 88%;
+  margin-left: auto;
+  background: var(--bubble-user);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+
+/* Reply prose is emitted as real blocks, so give the serif somewhere to sit.
+   Margins are reset first because the element inherits pre-wrap whitespace. */
+.msg:not(.msg--user) > .msg__body > :first-child {
+  margin-top: 0;
+}
+.msg:not(.msg--user) > .msg__body > :last-child {
+  margin-bottom: 0;
+}
+.msg:not(.msg--user) > .msg__body p {
+  margin: 0 0 var(--lh-prose);
+}
+.msg:not(.msg--user) > .msg__body ul,
+.msg:not(.msg--user) > .msg__body ol {
+  margin: 0 0 var(--lh-prose);
+  padding-left: 1.35em;
+}
+.msg:not(.msg--user) > .msg__body li {
+  margin-bottom: 0.35em;
+}
+.msg:not(.msg--user) > .msg__body li::marker {
+  color: var(--faint);
+}
+.msg:not(.msg--user) > .msg__body strong {
+  font-weight: var(--fw-semibold);
+}
+.msg:not(.msg--user) > .msg__body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.1em 0.32em;
+}
+.msg:not(.msg--user) > .msg__body .link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Collapsed tool summary between turns. */
+.summary__caret {
+  font-size: 9px;
+  line-height: 1;
+  color: var(--faint);
+}
+
+/* Collapsed activity summary. */
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 0;
+}
+.summary:hover {
+  color: var(--text);
+}
+
+/* Environment rows: no chevrons, a gear on the configurable one. */
+.envlist li {
+  padding: 5px 6px;
+  gap: 8px;
+}
+.envlist .glyph {
+  color: var(--muted);
+  width: 15px;
+}
+.envlist .spacer {
+  margin-left: auto;
+}
+.envlist .row-config {
+  color: var(--muted);
+  font-size: 12px;
+}
+.toggle-row {
+  gap: 8px;
+}
+.toggle-row .glyph {
+  color: var(--muted);
+  width: 15px;
+}
+
+/* Context breakdown: the part the single bar was missing. */
+.breakdown {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+.breakdown li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+}
+.breakdown .swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.breakdown .label {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.breakdown .tokens {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.breakdown .pct {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+  text-align: right;
+}
+.breakdown li.is-headroom .swatch {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.breakdown__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+}
+
+/* Tighter panel rhythm. */
+.panel__section {
+  padding: 10px 12px;
+}
+.panel__section--tight {
+  padding: 8px 12px;
+}
+.panel__title {
+  margin-bottom: 8px;
+}
+
+/* Thin scrollbar, closer to the reference. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  border: 0;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}

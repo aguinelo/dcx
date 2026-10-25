@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:"
+    />
+    <title>repl</title>
+    <link rel="stylesheet" href="./fonts.css" />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="titlebar__left">
+        <button class="iconbtn" data-action="toggle-sidebar" title="Alternar barra lateral">▤</button>
+        <button class="iconbtn" data-action="back" title="Voltar">←</button>
+        <button class="iconbtn" data-action="forward" title="Avançar">→</button>
+        <button class="iconbtn" data-action="reload" title="Recarregar">⟳</button>
+        <button class="iconbtn" data-action="search" title="Buscar">⌕</button>
+        <button class="iconbtn" data-action="toggle-code" title="Código">‹/›</button>
+        <button class="project-chip" id="project-chip">repl <span class="chev">▾</span></button>
+      </div>
+      <div class="titlebar__right">
+        <button class="iconbtn" title="Atalhos">⌘</button>
+        <button class="iconbtn" data-action="terminal" title="Terminal">>_</button>
+        <button class="iconbtn" title="Painel">▣</button>
+        <button class="iconbtn" title="Globo">⊕</button>
+        <button class="iconbtn" title="Projetos">▢</button>
+        <button class="iconbtn" title="Mais">⋯</button>
+      </div>
+    </header>
+
+    <div class="layout" id="layout" data-terminal="closed">
+      <!-- ── Sidebar ─────────────────────────────────────────────── -->
+      <aside class="sidebar" id="sidebar">
+        <nav class="sidebar__nav">
+          <button class="navitem navitem--strong" data-action="new"><span class="glyph">+</span><span>Criar</span></button>
+          <button class="navitem"><span class="glyph">⌕</span><span>Procurar</span></button>
+          <button class="navitem"><span class="glyph">▧</span><span>Artefatos</span></button>
+          <button class="navitem"><span class="glyph">◴</span><span>Rotinas</span></button>
+          <button class="navitem"><span class="glyph">◑</span><span>Personalização</span></button>
+          <button class="navitem"><span class="glyph">⋯</span><span>Mais</span></button>
+        </nav>
+
+        <div class="sidebar__scroll" id="sidebar-scroll">
+          <section class="group">
+            <h2 class="group__title"><span>Todos</span><span class="chev">▾</span></h2>
+            <ul class="conversations" id="all-conversations"></ul>
+          </section>
+
+          <section class="group">
+            <h2 class="group__title"><span>Fixados</span><span class="chev">▾</span></h2>
+            <ul class="conversations" id="pinned"></ul>
+          </section>
+          <div id="groups"></div>
+        </div>
+
+        <footer class="sidebar__footer">
+          <button class="account"><span class="avatar">A</span> <span>Aguinelo</span> <span class="muted">Max</span> <span class="chev">▾</span></button>
+          <button class="iconbtn" title="Configurações">⚙</button>
+        </footer>
+      </aside>
+
+      <!-- ── Chat ────────────────────────────────────────────────── -->
+      <main class="chat">
+        <div class="chat__scroll" id="thread">
+          <div class="thread" id="thread-inner"></div>
+        </div>
+
+        <div class="composer">
+          <div id="notice" hidden></div>
+          <div class="composer__box">
+            <button class="composer__attach" title="Anexar">+</button>
+            <textarea id="input" rows="1" placeholder="Digite / para comandos" aria-label="Mensagem"></textarea>
+            <button class="composer__mic" title="Voz">◉</button>
+          </div>
+          <div class="composer__meta">
+            <div class="composer__meta-left">
+              <button class="meta-chip meta-chip--action" id="sim-start" data-action="simulate">▶ Simular loop</button>
+              <button class="meta-chip meta-chip--stop" id="sim-stop" data-action="stop-sim" hidden>■ Parar</button>
+              <button class="meta-chip">Automático</button>
+              <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
+            </div>
+            <button class="meta-chip">claude-sonnet-4-5 <span class="muted">Alto</span> <span class="dot dot--danger"></span></button>
+          </div>
+        </div>
+      </main>
+
+      <!-- ── Context panel ───────────────────────────────────────── -->
+      <aside class="panel" id="panel">
+        <section class="panel__section">
+          <h2 class="panel__title">Ambiente <span class="chev">▾</span></h2>
+          <ul class="envlist" id="env"></ul>
+          <div class="toggle-row">
+            <span class="glyph">↖</span>
+            <span>Remote Control</span>
+            <button class="toggle" role="switch" aria-checked="false"><span></span></button>
+          </div>
+        </section>
+
+        <section class="panel__section">
+          <h2 class="panel__title">Contexto <span class="chev">▾</span></h2>
+          <div class="gauge">
+            <div class="gauge__row">
+              <span id="ctx-pct">0% usado</span>
+              <span class="muted" id="ctx-count">0 / 1M</span>
+            </div>
+            <div class="gauge__bar"><div class="gauge__fill" id="ctx-fill"></div></div>
+          </div>
+          <ul class="breakdown" id="breakdown"></ul>
+          <div class="breakdown__foot">
+            <span class="muted" id="ctx-headroom"></span>
+            <button class="btn">Compactar sessão</button>
+          </div>
+        </section>
+
+        <section class="panel__section panel__section--tight">
+          <h2 class="panel__title">
+            Conectores <span class="chev">▾</span>
+            <span class="badge" id="connectors">0 para reconectar</span>
+          </h2>
+        </section>
+
+        <section class="panel__section panel__section--tight" id="bg-section">
+          <h2 class="panel__title panel__title--toggle" data-action="toggle-bg">
+            Tarefas em segundo plano <span class="chev">▾</span>
+          </h2>
+          <ul class="bgtasks" id="bg-tasks"></ul>
+        </section>
+
+        <section class="panel__section panel__section--grow">
+          <h2 class="panel__title">Alterações <span class="chev">▾</span></h2>
+          <ul class="changes" id="changes"></ul>
+        </section>
+      </aside>
+
+      <!-- ── Embedded terminal ────────────────────────────────────── -->
+      <aside class="terminal" id="terminal">
+        <header class="terminal__head">
+          <span class="terminal__tabs">
+            <span class="terminal__tab is-active" id="terminal-label">Terminal repl</span>
+            <button class="iconbtn iconbtn--tiny" title="Nova sessão">+</button>
+          </span>
+          <button class="iconbtn" data-action="toggle-terminal" title="Fechar terminal">✕</button>
+        </header>
+        <div class="terminal__body" id="terminal-body"></div>
+      </aside>
+    </div>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

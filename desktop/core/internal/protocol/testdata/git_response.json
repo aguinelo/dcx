@@ -1,0 +1,26 @@
+{
+  "repository": true,
+  "root": "/src/dcode-side",
+  "branch": "side",
+  "detached": false,
+  "head": "6ec45f1",
+  "worktree": true,
+  "main_checkout": "/src/dcode",
+  "files": [
+    {
+      "path": "internal/vcs/tree.go",
+      "status": "modified",
+      "added": 12,
+      "removed": 3,
+      "binary": false
+    },
+    {
+      "path": "logo.png",
+      "status": "untracked",
+      "added": 0,
+      "removed": 0,
+      "binary": true
+    }
+  ],
+  "truncated": false
+}
