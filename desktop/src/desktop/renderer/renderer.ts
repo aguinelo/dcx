@@ -71,6 +71,10 @@ let streamingAssistantText = '';
 let streamingPendingText = '';
 let streamFlushTimer: number | undefined;
 let thinkingNode: HTMLElement | undefined;
+let thinkingBody: HTMLElement | undefined;
+let thoughtCount = 0;
+let commandCount = 0;
+let editCount = 0;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
@@ -107,6 +111,7 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
     streamingAssistantText = '';
     streamingPendingText = '';
     thinkingNode = undefined;
+    thinkingBody = undefined;
     for (const message of session.messages) {
       if (message.role === 'user') addUserMessage(message.content);
       else addAssistantMessage(message.content, false);
@@ -450,6 +455,7 @@ function addUserMessage(text: string): void {
     thinkingNode.remove();
     thinkingNode = undefined;
   }
+  thinkingBody = undefined;
   streamingAssistantBody = undefined;
   streamingAssistantText = '';
   streamingPendingText = '';
@@ -761,12 +767,18 @@ function runSimulation(): void {
 }
 
 function addActivity(id: string, name: string, detail = ''): HTMLElement {
+  setThinking(true);
+  const lowerName = name.toLowerCase();
+  thoughtCount += 1;
+  if (lowerName.includes('run') || lowerName.includes('shell') || lowerName.includes('command')) commandCount += 1;
+  if (lowerName.includes('edit') || lowerName.includes('write')) editCount += 1;
+  updateThoughtSummary();
   const node = row(
     'activity activity--running',
     `<span class="activity__glyph">◆</span><span>${escapeHtml(name)}</span>${detail ? `<span class="activity__detail">${escapeHtml(detail)}</span>` : ''}`,
   );
   node.dataset.id = id;
-  thread.append(node);
+  (thinkingBody ?? thread).append(node);
   scrollToEnd();
   return node;
 }
@@ -899,14 +911,30 @@ function setPlaceholder(): void {
 
 function setThinking(active: boolean): void {
   if (active && !thinkingNode) {
-    thinkingNode = row('thinking', '<span class="thinking__dot">◌</span><span>Thought process</span>');
+    thoughtCount = 0;
+    commandCount = 0;
+    editCount = 0;
+    thinkingNode = row(
+      'thinking',
+      '<button class="thinking__summary" type="button" aria-expanded="true"><span class="thinking__chevron">⌄</span><span class="thinking__label">Thought process</span><span class="thinking__meta"></span></button><div class="thinking__body"></div>',
+    );
+    thinkingBody = thinkingNode.querySelector<HTMLElement>('.thinking__body') ?? undefined;
     thread.append(thinkingNode);
+    updateThoughtSummary();
     scrollToEnd();
   } else if (!active && thinkingNode) {
     thinkingNode.classList.add('thinking--done');
-    const label = thinkingNode.querySelector('span:last-child');
-    if (label) label.textContent = 'Thought process';
+    updateThoughtSummary();
   }
+}
+
+function updateThoughtSummary(): void {
+  const meta = thinkingNode?.querySelector<HTMLElement>('.thinking__meta');
+  if (!meta) return;
+  const parts = [`Thought ${Math.max(1, thoughtCount)} ${thoughtCount === 1 ? 'time' : 'times'}`];
+  if (commandCount) parts.push(`Ran ${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
+  if (editCount) parts.push(`edited ${editCount} ${editCount === 1 ? 'file' : 'files'}`);
+  meta.textContent = parts.join(' · ');
 }
 
 async function promoteCurrentSession(): Promise<void> {
@@ -1059,6 +1087,16 @@ function handleChromeAction(action: string): void {
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
+
+  const thoughtSummary = target.closest<HTMLElement>('.thinking__summary');
+  if (thoughtSummary) {
+    const thought = thoughtSummary.closest<HTMLElement>('.thinking');
+    if (thought) {
+      const collapsed = thought.classList.toggle('is-collapsed');
+      thoughtSummary.setAttribute('aria-expanded', String(!collapsed));
+    }
+    return;
+  }
 
   const sessionNode = target.closest<HTMLElement>('[data-session-id]');
   if (sessionNode?.dataset.sessionId) {

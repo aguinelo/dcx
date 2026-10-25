@@ -548,25 +548,55 @@ button {
 }
 
 .thinking {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   color: var(--muted);
   font-size: var(--fs-body-sm);
   line-height: var(--lh-body-sm);
-  padding: 4px 0;
+  padding: 4px 0 2px;
 }
-.thinking__dot {
-  color: var(--accent);
-  animation: thinking-pulse 1.2s ease-in-out infinite;
+.thinking__summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
 }
-.thinking--done .thinking__dot {
-  animation: none;
-  opacity: 0.7;
+.thinking__summary:hover {
+  color: var(--text);
 }
-@keyframes thinking-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
+.thinking__chevron {
+  width: 14px;
+  color: var(--faint);
+  font-size: 17px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+.thinking.is-collapsed .thinking__chevron {
+  transform: rotate(-90deg);
+}
+.thinking__label {
+  flex: none;
+}
+.thinking__meta {
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thinking__body {
+  margin: 5px 0 0 7px;
+  padding: 2px 0 2px 14px;
+  border-left: 1px solid var(--border-strong);
+  display: grid;
+  gap: 8px;
+}
+.thinking.is-collapsed .thinking__body {
+  display: none;
 }
 
 .notice {
