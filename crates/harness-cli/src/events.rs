@@ -42,6 +42,39 @@ impl EventLog {
         })
     }
 
+    pub fn completed_steps(&self) -> std::collections::BTreeSet<String> {
+        self.completed_events()
+            .filter_map(|event| event.payload["step_id"].as_str().map(str::to_owned))
+            .collect()
+    }
+
+    pub fn completed_files(&self) -> std::collections::BTreeSet<String> {
+        self.completed_events()
+            .flat_map(|event| {
+                event.payload["files"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|file| file.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn completed_events(&self) -> impl Iterator<Item = RunEvent> + '_ {
+        fs::read_to_string(&self.path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<RunEvent>(line).ok())
+            .filter(|event| {
+                event.event_type == "step.completed"
+                    && event.payload["approved"].as_bool().unwrap_or(false)
+                    && event.payload["merged"].as_bool().unwrap_or(false)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
     pub fn append(&mut self, event_type: &str, payload: serde_json::Value) -> Result<(), String> {
         self.sequence += 1;
         let event = RunEvent {
@@ -83,8 +116,16 @@ mod tests {
         let mut log = EventLog::create(&directory, "run-1").expect("create log");
         log.append("plan.created", serde_json::json!({"steps": 2}))
             .expect("first event");
-        log.append("step.completed", serde_json::json!({"step": "implement"}))
-            .expect("second event");
+        log.append(
+            "step.completed",
+            serde_json::json!({
+                "step_id": "implement",
+                "approved": true,
+                "merged": true,
+                "files": ["src/lib.rs"],
+            }),
+        )
+        .expect("second event");
         let lines = fs::read_to_string(log.path()).expect("read log");
         let events = lines
             .lines()
@@ -93,6 +134,15 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].sequence, 1);
         assert_eq!(events[1].event_type, "step.completed");
+        let completed = log.completed_steps();
+        assert!(completed.contains("implement"));
+        assert!(log.completed_files().contains("src/lib.rs"));
+        log.append(
+            "step.completed",
+            serde_json::json!({"step_id": "unmerged", "approved": true, "merged": false}),
+        )
+        .expect("third event");
+        assert!(!log.completed_steps().contains("unmerged"));
         let _ = fs::remove_dir_all(directory);
     }
 }

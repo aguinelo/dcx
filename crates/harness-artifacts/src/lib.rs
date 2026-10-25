@@ -696,6 +696,21 @@ impl Plan {
             self.steps.iter().map(|step| step.id.as_str()),
             "plan step id",
         )?;
+        for step in &self.steps {
+            if step.id.is_empty()
+                || step.id == "."
+                || step.id.contains("..")
+                || !step
+                    .id
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || "-_.".contains(character))
+            {
+                return Err(ValidationError::new(format!(
+                    "plan step id must be a safe path component: {}",
+                    step.id
+                )));
+            }
+        }
         if !self
             .steps
             .iter()
@@ -829,7 +844,47 @@ impl Plan {
             }
         }
 
-        self.check_acyclic()
+        self.check_acyclic()?;
+        self.validate_integration_order()
+    }
+
+    fn validate_integration_order(&self) -> Result<(), ValidationError> {
+        fn reaches<'a>(
+            steps: &'a std::collections::HashMap<&'a str, &'a PlanStep>,
+            from: &'a str,
+            target: &'a str,
+            visited: &mut std::collections::HashSet<&'a str>,
+        ) -> bool {
+            if !visited.insert(from) {
+                return false;
+            }
+            let Some(step) = steps.get(from) else {
+                return false;
+            };
+            step.depends_on.iter().any(|dependency| {
+                dependency == target || reaches(steps, dependency, target, visited)
+            })
+        }
+
+        let steps = self
+            .steps
+            .iter()
+            .map(|step| (step.id.as_str(), step))
+            .collect::<std::collections::HashMap<_, _>>();
+        for step in self
+            .steps
+            .iter()
+            .filter(|step| step.id != self.integration_step_id)
+        {
+            let mut visited = std::collections::HashSet::new();
+            if !reaches(&steps, &self.integration_step_id, &step.id, &mut visited) {
+                return Err(ValidationError::new(format!(
+                    "integration step must depend on step {}",
+                    step.id
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn check_acyclic(&self) -> Result<(), ValidationError> {
@@ -914,6 +969,41 @@ impl Plan {
             ));
         }
         Ok(ordered)
+    }
+}
+
+impl Plan {
+    /// Topological levels of steps that can run concurrently. Every step in a
+    /// group only depends on steps from earlier groups.
+    pub fn execution_groups(&self) -> Result<Vec<Vec<&PlanStep>>, ValidationError> {
+        let mut groups = Vec::new();
+        let mut emitted = std::collections::HashSet::new();
+        loop {
+            let ready = self
+                .steps
+                .iter()
+                .filter(|step| {
+                    !emitted.contains(step.id.as_str())
+                        && step
+                            .depends_on
+                            .iter()
+                            .all(|dependency| emitted.contains(dependency.as_str()))
+                })
+                .collect::<Vec<_>>();
+            if ready.is_empty() {
+                break;
+            }
+            for step in &ready {
+                emitted.insert(step.id.as_str());
+            }
+            groups.push(ready);
+        }
+        if emitted.len() != self.steps.len() {
+            return Err(ValidationError::new(
+                "plan dependency cycle prevents execution groups",
+            ));
+        }
+        Ok(groups)
     }
 }
 
@@ -1502,6 +1592,49 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["convert", "integrate"]
         );
+    }
+
+    #[test]
+    fn execution_groups_expose_independent_steps() {
+        let mut plan = plan();
+        plan.steps.push(PlanStep {
+            id: "docs".into(),
+            title: "Documentar".into(),
+            description: "Escrever documentação".into(),
+            criteria: vec!["records".into()],
+            sensors: vec!["records-sensor".into()],
+            depends_on: vec![],
+            files_hint: vec![],
+        });
+        plan.steps.push(PlanStep {
+            id: "integrate".into(),
+            title: "Integrar".into(),
+            description: "Validar tudo".into(),
+            criteria: vec!["records".into()],
+            sensors: vec!["records-sensor".into(), "hidden-records-sensor".into()],
+            depends_on: vec!["convert".into(), "docs".into()],
+            files_hint: vec![],
+        });
+        plan.integration_step_id = "integrate".into();
+        let groups = plan.execution_groups().expect("grupos");
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].len(), 2);
+        assert_eq!(groups[1][0].id, "integrate");
+    }
+
+    #[test]
+    fn integration_step_must_depend_on_every_other_step() {
+        let mut plan = plan();
+        plan.steps.push(PlanStep {
+            id: "docs".into(),
+            title: "Documentar".into(),
+            description: "Escrever documentação".into(),
+            criteria: vec!["records".into()],
+            sensors: vec!["records-sensor".into()],
+            depends_on: vec![],
+            files_hint: vec![],
+        });
+        assert!(plan.validate_for(&contract(), &suite()).is_err());
     }
 
     fn assert_closed_objects(value: &serde_json::Value) {

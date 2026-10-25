@@ -13,8 +13,8 @@ use harness_artifacts::{
     SensorVisibility, Understanding,
 };
 use harness_engine::{
-    Executor, RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
-    Verifier, check_sensors_fail,
+    RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
+    check_sensors_fail,
 };
 use harness_sensors::ScriptSensorRunner;
 
@@ -125,26 +125,24 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     println!("Executando em cópia isolada: {}", run_workspace.display());
 
     lifecycle.transition(RunState::Executing)?;
-    let mut runner = ScriptSensorRunner::materialize(
-        &implementation,
-        &approved_bundle.sensor_suite,
-        &sensor_dir,
-    )
-    .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?
-    .sandbox_from_env()?;
     let lock = SensorLock::from_suite(&approved_bundle.sensor_suite)?;
     lock.verify(&approved_bundle.sensor_suite)?;
-    let mut executor = providers::executor()?;
-    let mut verifier = providers::verifier()?;
-    let execution = execute_plan(
-        &run_workspace,
-        &plan,
-        &approved_bundle,
-        &mut runner,
-        executor.as_mut(),
-        verifier.as_mut(),
-        &mut events,
-    )?;
+    let run_root = run_workspace
+        .parent()
+        .ok_or("Cópia isolada sem diretório pai.")?;
+    let step_executor = ProviderStepExecutor {
+        implementation: &implementation,
+        sensor_dir: &sensor_dir,
+    };
+    let execution = execute_plan(PlanExecution {
+        base: &run_workspace,
+        run_root,
+        plan: &plan,
+        bundle: &approved_bundle,
+        skip: &BTreeSet::new(),
+        executor: &step_executor,
+        events: &mut events,
+    })?;
     save_execution(
         &artifact_dir,
         &run_id,
@@ -160,13 +158,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         artifact_dir.join("delivery_report.json").display()
     );
     if execution.verdict.approved {
-        let changed = execution
-            .step_reports
-            .iter()
-            .flat_map(|report| report.files_changed.iter().cloned())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let changed = events.completed_files().into_iter().collect::<Vec<_>>();
         let applied = workspace::apply_changes(&workspace, &run_workspace, &changed)
             .map_err(|error| format!("Não foi possível aplicar as mudanças aprovadas: {error}"))?;
         events.append(
@@ -218,34 +210,47 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
         .map_err(|error| format!("Sensores inválidos: {error}"))?;
 
     let run_workspace = state_root().join("runs").join(run_id).join("workspace");
-    if !run_workspace.is_dir() {
+    let workspace_existed = run_workspace.is_dir();
+    if !workspace_existed {
         workspace::copy_project(&workspace, &run_workspace, &[state_root()])
             .map_err(|error| format!("Não foi possível preparar a cópia isolada: {error}"))?;
     }
     let sensor_dir = sensor_directory(run_id);
-    let mut runner =
-        ScriptSensorRunner::materialize(&implementation, &bundle.sensor_suite, &sensor_dir)
-            .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?
-            .sandbox_from_env()?;
     let lock = SensorLock::from_suite(&bundle.sensor_suite)?;
     lock.verify(&bundle.sensor_suite)?;
-    let mut executor = providers::executor()?;
-    let mut verifier = providers::verifier()?;
     let mut events = EventLog::open(&artifact_dir, run_id)?;
     events.append(
         "run.resumed",
         serde_json::json!({"workspace": run_workspace.display().to_string()}),
     )?;
-    println!("Retomando run {} em {}", run_id, run_workspace.display());
-    let execution = execute_plan(
-        &run_workspace,
-        &plan,
-        &bundle,
-        &mut runner,
-        executor.as_mut(),
-        verifier.as_mut(),
-        &mut events,
-    )?;
+    let mut skip = if workspace_existed {
+        events.completed_steps()
+    } else {
+        BTreeSet::new()
+    };
+    skip.remove(&plan.integration_step_id);
+    println!(
+        "Retomando run {} em {} ({} passo(s) concluído(s) serão pulados)",
+        run_id,
+        run_workspace.display(),
+        skip.len()
+    );
+    let run_root = run_workspace
+        .parent()
+        .ok_or("Cópia isolada sem diretório pai.")?;
+    let step_executor = ProviderStepExecutor {
+        implementation: &implementation,
+        sensor_dir: &sensor_dir,
+    };
+    let execution = execute_plan(PlanExecution {
+        base: &run_workspace,
+        run_root,
+        plan: &plan,
+        bundle: &bundle,
+        skip: &skip,
+        executor: &step_executor,
+        events: &mut events,
+    })?;
     save_execution(
         &artifact_dir,
         run_id,
@@ -257,13 +262,7 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
         execution.states.last().unwrap()
     );
     if execution.verdict.approved {
-        let changed = execution
-            .step_reports
-            .iter()
-            .flat_map(|report| report.files_changed.iter().cloned())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let changed = events.completed_files().into_iter().collect::<Vec<_>>();
         let applied = workspace::apply_changes(&workspace, &run_workspace, &changed)
             .map_err(|error| format!("Não foi possível aplicar as mudanças aprovadas: {error}"))?;
         events.append(
@@ -288,93 +287,276 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> InteractiveResult<T
         .map_err(|error| format!("JSON inválido em {}: {error}", path.display()).into())
 }
 
-fn execute_plan(
-    workspace: &Path,
-    plan: &Plan,
-    bundle: &ContractBundle,
-    runner: &mut ScriptSensorRunner,
-    executor: &mut dyn Executor,
-    verifier: &mut dyn Verifier,
-    events: &mut EventLog,
-) -> InteractiveResult<RunExecution> {
-    let coordinator = RunCoordinator::with_verification_limit(3, 3)?.stop_at_merge(true);
-    let mut step_reports = Vec::new();
-    let mut sensor_results = Vec::new();
-    let mut states = Vec::new();
-    let mut verdict: Option<harness_artifacts::Verdict> = None;
-    for step in plan.ordered_steps()? {
-        let contract = bundle.contract.for_criteria(&step.criteria);
-        let suite = bundle.sensor_suite.for_step(step);
-        println!("Executando passo {}: {}", step.id, step.title);
-        let execution = coordinator
+struct PlanExecution<'a> {
+    base: &'a Path,
+    run_root: &'a Path,
+    plan: &'a Plan,
+    bundle: &'a ContractBundle,
+    skip: &'a BTreeSet<String>,
+    executor: &'a dyn StepExecutor,
+    events: &'a mut EventLog,
+}
+
+trait StepExecutor: Send + Sync {
+    fn execute(
+        &self,
+        step: &harness_artifacts::PlanStep,
+        contract: &harness_artifacts::Contract,
+        suite: &harness_artifacts::SensorSuite,
+        workspace: &Path,
+    ) -> Result<RunExecution, String>;
+}
+
+struct ProviderStepExecutor<'a> {
+    implementation: &'a SensorImplementation,
+    sensor_dir: &'a Path,
+}
+
+impl StepExecutor for ProviderStepExecutor<'_> {
+    fn execute(
+        &self,
+        step: &harness_artifacts::PlanStep,
+        contract: &harness_artifacts::Contract,
+        suite: &harness_artifacts::SensorSuite,
+        workspace: &Path,
+    ) -> Result<RunExecution, String> {
+        let step_sensor_dir = self.sensor_dir.join("steps").join(&step.id);
+        let mut runner =
+            ScriptSensorRunner::materialize(self.implementation, suite, &step_sensor_dir)?
+                .sandbox_from_env()?;
+        let mut executor = providers::executor()?;
+        let mut verifier = providers::verifier()?;
+        RunCoordinator::with_verification_limit(3, 3)?
+            .stop_at_merge(true)
             .execute_step(
                 RunRequest {
-                    contract: &contract,
-                    suite: &suite,
+                    contract,
+                    suite,
                     step_id: &step.id,
                     workspace,
                 },
                 RunParticipants {
-                    executor: &mut *executor,
-                    sensor_runner: &mut *runner,
-                    verifier: &mut *verifier,
+                    executor: executor.as_mut(),
+                    sensor_runner: &mut runner,
+                    verifier: verifier.as_mut(),
                 },
             )
-            .map_err(std::io::Error::other)?;
-        let attempts = execution.step_reports.len();
-        let approved = execution.verdict.approved;
-        step_reports.extend(execution.step_reports);
-        sensor_results.extend(execution.sensor_results);
-        states = execution.states;
-        events.append(
-            "step.completed",
-            serde_json::json!({
-                "step_id": step.id,
-                "approved": approved,
-                "attempts": attempts,
-            }),
-        )?;
-        let step_verdict = execution.verdict;
-        match verdict.as_mut() {
-            Some(combined) => {
-                combined.approved &= step_verdict.approved;
-                for criterion in step_verdict.criteria {
-                    if let Some(existing) = combined
+            .map_err(|error| error.to_string())
+    }
+}
+
+struct StepOutcome {
+    step_id: String,
+    execution: RunExecution,
+    workspace: PathBuf,
+}
+
+fn execute_plan(context: PlanExecution<'_>) -> InteractiveResult<RunExecution> {
+    let PlanExecution {
+        base,
+        run_root,
+        plan,
+        bundle,
+        skip,
+        executor,
+        events,
+    } = context;
+    let groups = plan.execution_groups()?;
+    let mut step_reports = Vec::new();
+    let mut sensor_results = Vec::new();
+    let mut states = Vec::new();
+    let mut verdict: Option<harness_artifacts::Verdict> = None;
+    let mut merged_paths = std::collections::BTreeMap::<String, String>::new();
+
+    for step in &plan.steps {
+        if skip.contains(&step.id) {
+            merge_verdict(
+                &mut verdict,
+                harness_artifacts::Verdict {
+                    schema_version: SCHEMA_VERSION,
+                    approved: true,
+                    criteria: step
                         .criteria
-                        .iter_mut()
-                        .find(|existing| existing.criterion_id == criterion.criterion_id)
-                    {
-                        *existing = criterion;
-                    } else {
-                        combined.criteria.push(criterion);
-                    }
-                }
-                for issue in step_verdict.issues {
-                    if !combined.issues.iter().any(|existing| {
-                        existing.criterion_id == issue.criterion_id
-                            && existing.description == issue.description
-                    }) {
-                        combined.issues.push(issue);
-                    }
-                }
-                for note in step_verdict.notes {
-                    if !combined.notes.contains(&note) {
-                        combined.notes.push(note);
-                    }
-                }
-            }
-            None => verdict = Some(step_verdict),
+                        .iter()
+                        .map(|criterion| harness_artifacts::CriterionVerdict {
+                            criterion_id: criterion.clone(),
+                            passed: true,
+                            evidence: vec!["concluído em execução anterior".into()],
+                        })
+                        .collect(),
+                    issues: vec![],
+                    notes: vec![format!("Passo {} retomado sem reexecução.", step.id)],
+                },
+            );
         }
-        if !approved {
+    }
+
+    for group in groups {
+        let active = group
+            .iter()
+            .copied()
+            .filter(|step| !skip.contains(&step.id))
+            .collect::<Vec<_>>();
+        if active.is_empty() {
+            continue;
+        }
+        for step in &active {
+            println!("Executando passo {}: {}", step.id, step.title);
+        }
+        let mut outcomes = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for step in &active {
+                let step = *step;
+                handles.push(scope.spawn(move || run_step(executor, base, run_root, bundle, step)));
+            }
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .map_err(|_| "um passo entrou em pânico".to_owned())?
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .map_err(|error| format!("Falha ao executar passos: {error}"))?;
+        outcomes.sort_by_key(|outcome| {
+            active
+                .iter()
+                .position(|step| step.id == outcome.step_id)
+                .unwrap_or(usize::MAX)
+        });
+
+        let group_failed = outcomes
+            .iter()
+            .any(|outcome| !outcome.execution.verdict.approved);
+        if group_failed {
+            for outcome in &outcomes {
+                events.append(
+                    "step.completed",
+                    serde_json::json!({
+                        "step_id": outcome.step_id,
+                        "approved": outcome.execution.verdict.approved,
+                        "merged": false,
+                        "attempts": outcome.execution.step_reports.len(),
+                    }),
+                )?;
+            }
+        } else {
+            for outcome in &outcomes {
+                let changed = changed_paths(&outcome.execution);
+                for path in &changed {
+                    if let Some(owner) = merged_paths.get(path) {
+                        return Err(format!(
+                            "passos {} e {} alteraram o mesmo arquivo: {}",
+                            owner, outcome.step_id, path
+                        )
+                        .into());
+                    }
+                    merged_paths.insert(path.clone(), outcome.step_id.clone());
+                }
+                workspace::apply_changes(base, &outcome.workspace, &changed).map_err(|error| {
+                    format!(
+                        "Não foi possível integrar o passo {}: {error}",
+                        outcome.step_id
+                    )
+                })?;
+                events.append(
+                    "step.completed",
+                    serde_json::json!({
+                        "step_id": outcome.step_id,
+                        "approved": true,
+                        "merged": true,
+                        "attempts": outcome.execution.step_reports.len(),
+                        "files": changed,
+                    }),
+                )?;
+            }
+        }
+        for outcome in outcomes {
+            step_reports.extend(outcome.execution.step_reports);
+            sensor_results.extend(outcome.execution.sensor_results);
+            states = outcome.execution.states;
+            merge_verdict(&mut verdict, outcome.execution.verdict);
+        }
+        if group_failed {
             break;
         }
     }
+
     Ok(RunExecution {
         step_reports,
         sensor_results,
         verdict: verdict.ok_or("Plano sem passos executáveis.")?,
         states,
     })
+}
+
+fn run_step(
+    executor: &dyn StepExecutor,
+    base: &Path,
+    run_root: &Path,
+    bundle: &ContractBundle,
+    step: &harness_artifacts::PlanStep,
+) -> Result<StepOutcome, String> {
+    let step_workspace = run_root.join("steps").join(&step.id);
+    if step_workspace.exists() {
+        fs::remove_dir_all(&step_workspace).map_err(|error| error.to_string())?;
+    }
+    workspace::copy_project(base, &step_workspace, &[])?;
+    let contract = bundle.contract.for_criteria(&step.criteria);
+    let suite = bundle.sensor_suite.for_step(step);
+    let execution = executor.execute(step, &contract, &suite, &step_workspace)?;
+    Ok(StepOutcome {
+        step_id: step.id.clone(),
+        execution,
+        workspace: step_workspace,
+    })
+}
+
+fn changed_paths(execution: &RunExecution) -> Vec<String> {
+    execution
+        .step_reports
+        .iter()
+        .flat_map(|report| report.files_changed.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn merge_verdict(
+    combined: &mut Option<harness_artifacts::Verdict>,
+    step_verdict: harness_artifacts::Verdict,
+) {
+    match combined.as_mut() {
+        Some(combined) => {
+            combined.approved &= step_verdict.approved;
+            for criterion in step_verdict.criteria {
+                if let Some(existing) = combined
+                    .criteria
+                    .iter_mut()
+                    .find(|existing| existing.criterion_id == criterion.criterion_id)
+                {
+                    *existing = criterion;
+                } else {
+                    combined.criteria.push(criterion);
+                }
+            }
+            for issue in step_verdict.issues {
+                if !combined.issues.iter().any(|existing| {
+                    existing.criterion_id == issue.criterion_id
+                        && existing.description == issue.description
+                }) {
+                    combined.issues.push(issue);
+                }
+            }
+            for note in step_verdict.notes {
+                if !combined.notes.contains(&note) {
+                    combined.notes.push(note);
+                }
+            }
+        }
+        None => *combined = Some(step_verdict),
+    }
 }
 
 fn save_execution(
@@ -807,4 +989,306 @@ fn read_line(prompt: &str) -> InteractiveResult<String> {
         return Err("Entrada encerrada antes de concluir a etapa.".into());
     }
     Ok(value.trim().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harness_artifacts::{
+        Contract, Criterion, CriterionVerdict, PlanStep, SCHEMA_VERSION, SensorKind, SensorSpec,
+        SensorSuite, SensorType, SensorVisibility, StepReport, Verdict,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct FakeStepExecutor {
+        calls: AtomicUsize,
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+        conflict: bool,
+    }
+
+    impl FakeStepExecutor {
+        fn new(conflict: bool) -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+                active: AtomicUsize::new(0),
+                max_active: AtomicUsize::new(0),
+                conflict,
+            }
+        }
+    }
+
+    impl StepExecutor for FakeStepExecutor {
+        fn execute(
+            &self,
+            step: &PlanStep,
+            contract: &Contract,
+            _suite: &SensorSuite,
+            workspace: &Path,
+        ) -> Result<RunExecution, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(50));
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            let filename = if self.conflict {
+                "same.txt".to_owned()
+            } else {
+                format!("{}.txt", step.id)
+            };
+            fs::write(workspace.join(&filename), step.id.as_bytes())
+                .map_err(|error| error.to_string())?;
+            let verdict = Verdict {
+                schema_version: SCHEMA_VERSION,
+                approved: true,
+                criteria: contract
+                    .criteria
+                    .iter()
+                    .map(|criterion| CriterionVerdict {
+                        criterion_id: criterion.id.clone(),
+                        passed: true,
+                        evidence: vec!["fake".into()],
+                    })
+                    .collect(),
+                issues: vec![],
+                notes: vec![],
+            };
+            Ok(RunExecution {
+                step_reports: vec![StepReport {
+                    schema_version: SCHEMA_VERSION,
+                    step_id: step.id.clone(),
+                    attempts: 1,
+                    summary: "fake".into(),
+                    files_changed: vec![filename],
+                    decisions: vec![],
+                    disputes: vec![],
+                }],
+                sensor_results: vec![],
+                verdict,
+                states: vec![RunState::AwaitingMerge],
+            })
+        }
+    }
+
+    fn test_bundle() -> ContractBundle {
+        let criteria = vec![
+            Criterion {
+                id: "one".into(),
+                description: "primeiro".into(),
+            },
+            Criterion {
+                id: "two".into(),
+                description: "segundo".into(),
+            },
+        ];
+        let sensors = criteria
+            .iter()
+            .flat_map(|criterion| {
+                ["visible", "hidden"].map(|visibility| SensorSpec {
+                    id: format!("{}-{}", criterion.id, visibility),
+                    criterion_id: criterion.id.clone(),
+                    sensor_type: SensorType::Test,
+                    kind: SensorKind::Computational,
+                    visibility: if visibility == "visible" {
+                        SensorVisibility::Visible
+                    } else {
+                        SensorVisibility::Hidden
+                    },
+                    purpose: "acceptance".into(),
+                    check: "check".into(),
+                })
+            })
+            .collect();
+        ContractBundle {
+            schema_version: SCHEMA_VERSION,
+            contract: Contract {
+                schema_version: SCHEMA_VERSION,
+                objective: "objetivo".into(),
+                assumptions: vec![],
+                criteria,
+                interface: serde_json::Value::Null,
+                constraints: vec![],
+                out_of_scope: vec![],
+            },
+            sensor_suite: SensorSuite {
+                schema_version: SCHEMA_VERSION,
+                sensors,
+            },
+        }
+    }
+
+    fn test_plan() -> Plan {
+        let step = |id: &str, criterion: &str| PlanStep {
+            id: id.into(),
+            title: id.into(),
+            description: id.into(),
+            criteria: vec![criterion.into()],
+            sensors: vec![
+                format!("{criterion}-visible"),
+                format!("{criterion}-hidden"),
+            ],
+            depends_on: vec![],
+            files_hint: vec![],
+        };
+        Plan {
+            schema_version: SCHEMA_VERSION,
+            contract_version: SCHEMA_VERSION,
+            steps: vec![step("one", "one"), step("two", "two")],
+            integration_step_id: "two".into(),
+            rationale: "teste".into(),
+        }
+    }
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "harness-parallel-{}-{nanos}-{label}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("temp dir");
+        path
+    }
+
+    #[test]
+    fn independent_steps_run_in_parallel_and_merge_changes() {
+        let base = temp_dir("base");
+        let run_root = temp_dir("run");
+        let event_dir = temp_dir("events");
+        fs::write(base.join("base.txt"), "base").expect("base");
+        let bundle = test_bundle();
+        let plan = test_plan();
+        let executor = FakeStepExecutor::new(false);
+        let mut events = EventLog::create(&event_dir, "run").expect("events");
+
+        let execution = execute_plan(PlanExecution {
+            base: &base,
+            run_root: &run_root,
+            plan: &plan,
+            bundle: &bundle,
+            skip: &BTreeSet::new(),
+            executor: &executor,
+            events: &mut events,
+        })
+        .expect("execução paralela");
+
+        assert!(execution.verdict.approved);
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 2);
+        assert!(executor.max_active.load(Ordering::SeqCst) >= 2);
+        assert!(base.join("one.txt").is_file());
+        assert!(base.join("two.txt").is_file());
+        let events = fs::read_to_string(event_dir.join("events.jsonl")).expect("eventos");
+        assert_eq!(events.lines().count(), 2);
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(run_root);
+        let _ = fs::remove_dir_all(event_dir);
+    }
+
+    #[test]
+    fn skipped_steps_are_not_executed() {
+        let base = temp_dir("skip-base");
+        let run_root = temp_dir("skip-run");
+        let event_dir = temp_dir("skip-events");
+        let bundle = test_bundle();
+        let plan = test_plan();
+        let executor = FakeStepExecutor::new(false);
+        let mut events = EventLog::create(&event_dir, "run").expect("events");
+        let skip = BTreeSet::from(["one".to_owned()]);
+
+        let execution = execute_plan(PlanExecution {
+            base: &base,
+            run_root: &run_root,
+            plan: &plan,
+            bundle: &bundle,
+            skip: &skip,
+            executor: &executor,
+            events: &mut events,
+        })
+        .expect("execução com skip");
+
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+        assert!(
+            execution
+                .verdict
+                .criteria
+                .iter()
+                .any(|criterion| criterion.criterion_id == "one" && criterion.passed)
+        );
+        assert!(!base.join("one.txt").exists());
+        assert!(base.join("two.txt").is_file());
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(run_root);
+        let _ = fs::remove_dir_all(event_dir);
+    }
+
+    #[test]
+    fn completed_files_accumulate_across_resume() {
+        let base = temp_dir("resume-base");
+        let run_root = temp_dir("resume-run");
+        let event_dir = temp_dir("resume-events");
+        let bundle = test_bundle();
+        let plan = test_plan();
+        let executor = FakeStepExecutor::new(false);
+        let mut events = EventLog::create(&event_dir, "run").expect("events");
+        execute_plan(PlanExecution {
+            base: &base,
+            run_root: &run_root,
+            plan: &plan,
+            bundle: &bundle,
+            skip: &BTreeSet::new(),
+            executor: &executor,
+            events: &mut events,
+        })
+        .expect("primeira execução");
+
+        let mut resumed = EventLog::open(&event_dir, "run").expect("reabrir eventos");
+        let skip = BTreeSet::from(["one".to_owned()]);
+        execute_plan(PlanExecution {
+            base: &base,
+            run_root: &run_root,
+            plan: &plan,
+            bundle: &bundle,
+            skip: &skip,
+            executor: &executor,
+            events: &mut resumed,
+        })
+        .expect("retomada");
+
+        let files = resumed.completed_files();
+        assert!(files.contains("one.txt"));
+        assert!(files.contains("two.txt"));
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(run_root);
+        let _ = fs::remove_dir_all(event_dir);
+    }
+
+    #[test]
+    fn parallel_steps_cannot_change_the_same_file() {
+        let base = temp_dir("conflict-base");
+        let run_root = temp_dir("conflict-run");
+        let event_dir = temp_dir("conflict-events");
+        let bundle = test_bundle();
+        let plan = test_plan();
+        let executor = FakeStepExecutor::new(true);
+        let mut events = EventLog::create(&event_dir, "run").expect("events");
+
+        let error = execute_plan(PlanExecution {
+            base: &base,
+            run_root: &run_root,
+            plan: &plan,
+            bundle: &bundle,
+            skip: &BTreeSet::new(),
+            executor: &executor,
+            events: &mut events,
+        })
+        .expect_err("conflito deve falhar");
+
+        assert!(error.to_string().contains("mesmo arquivo"));
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(run_root);
+        let _ = fs::remove_dir_all(event_dir);
+    }
 }

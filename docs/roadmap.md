@@ -9,10 +9,10 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R2 | Sensores executáveis, lock e baseline | concluída |
 | R3 | Plano, cópia isolada, verifier e merge gate | concluída |
 | R4 | Prova adversarial `job-02`, disputa de sensor, issues saneadas | concluída; disputa interativa pendente |
-| R5 | Apply atômico, ledger de eventos e limpeza do estado | concluída; retomada pendente |
+| R5 | Apply atômico, ledger de eventos e limpeza do estado | concluída |
 | R6 | Isolamento de ambiente e sandbox opt-in dos sensores | concluída no macOS; Linux pendente |
 | R7 | Provider `auto`, CI e documentação operacional | concluída; custo por run pendente |
-| R8 | Passos paralelos, retomada e múltiplos runs | parcial: lock e retomada; paralelismo pendente |
+| R8 | Passos paralelos, retomada e múltiplos runs | concluída; demo live de plano paralelo pendente |
 
 ## Critérios de saída
 
@@ -24,4 +24,4 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 
 ## Próxima rodada
 
-R8 já tem lock de projeto e `harness resume --run <id>`, que reexecuta o plano a partir dos artefatos e da cópia isolada. Ainda faltam worktrees por passo e paralelismo real; a retomada reexecuta o plano em vez de pular passos concluídos.
+R8 tem lock de projeto, `harness resume --run <id>` e execução por grupos topológicos. Passos independentes rodam em cópias isoladas por passo (`runs/<id>/steps/<step_id>`), com merge no workspace base e detecção de conflito no mesmo grupo; a retomada pula passos com `step.completed` aprovado, exceto a integração. A demo live de um plano com passos paralelos ainda não foi feita.
