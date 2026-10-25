@@ -107,6 +107,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/runs/from-session/start") => handle_start_run(&mut stream, body),
         ("GET", "/runs/from-session/status") => handle_promotion_status(&mut stream, query),
         ("GET", "/runs/status") => handle_run_status(&mut stream, query),
+        ("GET", "/runs/events") => handle_run_events(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -212,6 +213,30 @@ fn handle_run_status(stream: &mut TcpStream, query: &str) -> Result<(), String> 
         200,
         &serde_json::to_string(&job).map_err(|error| error.to_string())?,
     )
+}
+
+fn handle_run_events(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /runs/events exige ?workspace=<diretório>".to_owned())?;
+    let run_id =
+        query_value(query, "run_id").ok_or("GET /runs/events exige &run_id=<id>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let run_id = percent_decode(&run_id)?;
+    let events = crate::jobs::events(&workspace, &run_id)?;
+    stream
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    for event in events {
+        let payload = format!(
+            "event: {}\ndata: {}\n\n",
+            event.event,
+            serde_json::to_string(&event.data).map_err(|error| error.to_string())?
+        );
+        stream
+            .write_all(payload.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    stream.flush().map_err(|error| error.to_string())
 }
 
 fn query_value(query: &str, name: &str) -> Option<String> {

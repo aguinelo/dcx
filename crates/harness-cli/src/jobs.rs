@@ -17,6 +17,13 @@ pub struct RunJob {
     pub created_at_unix_ms: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct JobEvent {
+    pub event: String,
+    pub data: serde_json::Value,
+    pub created_at_unix_ms: u64,
+}
+
 pub fn enqueue(workspace: &Path, session_id: &str, request: &str) -> Result<RunJob, String> {
     let run_id = format!("api-{}-{}", now_ms(), std::process::id());
     let job = RunJob {
@@ -37,7 +44,48 @@ pub fn enqueue(workspace: &Path, session_id: &str, request: &str) -> Result<RunJ
         serde_json::to_vec_pretty(&job).map_err(|error| format!("job inválido: {error}"))?,
     )
     .map_err(|error| format!("não foi possível salvar job {}: {error}", path.display()))?;
+    append_event(
+        workspace,
+        &run_id,
+        "queued",
+        serde_json::json!({"run_id": run_id}),
+    )?;
     Ok(job)
+}
+
+pub fn append_event(
+    workspace: &Path,
+    run_id: &str,
+    event: &str,
+    data: serde_json::Value,
+) -> Result<(), String> {
+    let path = jobs_root(workspace).join(format!("{run_id}.events.jsonl"));
+    let record = JobEvent {
+        event: event.to_owned(),
+        data,
+        created_at_unix_ms: now_ms(),
+    };
+    let line =
+        serde_json::to_string(&record).map_err(|error| format!("evento inválido: {error}"))?;
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| format!("não foi possível abrir eventos {}: {error}", path.display()))?;
+    writeln!(file, "{line}").map_err(|error| format!("não foi possível gravar evento: {error}"))
+}
+
+pub fn events(workspace: &Path, run_id: &str) -> Result<Vec<JobEvent>, String> {
+    let path = jobs_root(workspace).join(format!("{run_id}.events.jsonl"));
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("não foi possível ler eventos {}: {error}", path.display()))?;
+    text.lines()
+        .map(|line| serde_json::from_str(line).map_err(|error| format!("evento inválido: {error}")))
+        .collect()
 }
 
 pub fn load(workspace: &Path, run_id: &str) -> Result<RunJob, String> {
