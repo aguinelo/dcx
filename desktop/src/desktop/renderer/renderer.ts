@@ -19,7 +19,7 @@ import {
 } from './simulation.ts';
 
 interface AgentEventPayload {
-  type: 'text' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error' | 'run_event';
+  type: 'text' | 'progress' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error' | 'run_event';
   id?: string;
   name?: string;
   input?: unknown;
@@ -841,6 +841,17 @@ bridge.onEvent((payload) => {
       flushAssistantStream();
       if (payload.id) addActivity(payload.id, payload.name ?? 'tool', summarize(payload.input));
       break;
+
+    case 'progress': {
+      setThinking(true);
+      const id = `progress-${Date.now()}-${thoughtCount}`;
+      const node = addActivity(id, payload.message ?? 'Processando…');
+      node.classList.remove('activity--running');
+      node.classList.add('activity--ok');
+      const glyph = node.querySelector('.activity__glyph');
+      if (glyph) glyph.textContent = '◌';
+      break;
+    }
 
     case 'tool_end':
       flushAssistantStream();

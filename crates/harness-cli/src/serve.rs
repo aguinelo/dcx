@@ -413,10 +413,32 @@ fn handle_chat(stream: &mut TcpStream, body: &str) -> Result<(), String> {
         stream.flush().map_err(|error| error.to_string())
     };
     send_event("session", serde_json::json!({"session_id": session_id}))?;
-    let mut stream_text = |text: &str| {
-        let _ = send_event("token", serde_json::json!({"text": text}));
+    let mut stream_event = |event: chat::ChatEvent| match event {
+        chat::ChatEvent::Text(text) => {
+            let _ = send_event("token", serde_json::json!({"text": text}));
+        }
+        chat::ChatEvent::Progress(message) => {
+            let _ = send_event("progress", serde_json::json!({"message": message}));
+        }
+        chat::ChatEvent::ToolStart { id, name, input } => {
+            let _ = send_event(
+                "tool_start",
+                serde_json::json!({"id": id, "name": name, "input": input}),
+            );
+        }
+        chat::ChatEvent::ToolEnd { id, ok, output } => {
+            let _ = send_event(
+                "tool_end",
+                serde_json::json!({"id": id, "ok": ok, "output": output}),
+            );
+        }
     };
-    let result = chat::send_message(&workspace, &mut session, &request.message, &mut stream_text);
+    let result = chat::send_message_with_events(
+        &workspace,
+        &mut session,
+        &request.message,
+        &mut stream_event,
+    );
     match result {
         Ok(reply) => send_event(
             "done",

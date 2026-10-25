@@ -79,12 +79,28 @@ pub struct ChatReply {
     pub output_tokens: Option<u64>,
 }
 
+#[derive(Debug)]
+pub enum ChatEvent {
+    Text(String),
+    Progress(String),
+    ToolStart {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolEnd {
+        id: String,
+        ok: bool,
+        output: String,
+    },
+}
+
 pub trait ChatProvider {
     fn send(
         &mut self,
         workspace: &Path,
         prompt: &str,
-        on_text: &mut dyn FnMut(&str),
+        on_event: &mut dyn FnMut(ChatEvent),
     ) -> Result<ChatReply, String>;
 }
 
@@ -136,7 +152,7 @@ impl ChatProvider for ClaudeChatProvider {
         &mut self,
         workspace: &Path,
         prompt: &str,
-        on_text: &mut dyn FnMut(&str),
+        on_event: &mut dyn FnMut(ChatEvent),
     ) -> Result<ChatReply, String> {
         let mut command = Command::new(&self.binary);
         command
@@ -217,14 +233,60 @@ impl ChatProvider for ClaudeChatProvider {
                     if let Some(text) = delta_text(&value) {
                         saw_delta = true;
                         streamed.push_str(text);
-                        on_text(text);
+                        on_event(ChatEvent::Text(text.to_owned()));
                     }
                 }
                 Some("assistant") => {
+                    for block in value
+                        .get("message")
+                        .and_then(|message| message.get("content"))
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
+                        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                            if let (Some(id), Some(name)) = (
+                                block.get("id").and_then(Value::as_str),
+                                block.get("name").and_then(Value::as_str),
+                            ) {
+                                on_event(ChatEvent::Progress(format!("Usando {name}…")));
+                                on_event(ChatEvent::ToolStart {
+                                    id: id.to_owned(),
+                                    name: name.to_owned(),
+                                    input: block.get("input").cloned().unwrap_or(Value::Null),
+                                });
+                            }
+                        }
+                    }
                     if let Some(text) = message_text(&value) {
                         assistant_text.push_str(&text);
                         if !saw_delta {
-                            on_text(&text);
+                            on_event(ChatEvent::Text(text));
+                        }
+                    }
+                }
+                Some("user") => {
+                    if let Some(content) = value
+                        .get("message")
+                        .and_then(|message| message.get("content"))
+                        .and_then(Value::as_array)
+                    {
+                        for block in content {
+                            if block.get("type").and_then(Value::as_str) == Some("tool_result") {
+                                if let Some(id) = block.get("tool_use_id").and_then(Value::as_str) {
+                                    on_event(ChatEvent::ToolEnd {
+                                        id: id.to_owned(),
+                                        ok: !block
+                                            .get("is_error")
+                                            .and_then(Value::as_bool)
+                                            .unwrap_or(false),
+                                        output: block
+                                            .get("content")
+                                            .map(Value::to_string)
+                                            .unwrap_or_default(),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -287,7 +349,7 @@ impl ChatProvider for ClaudeChatProvider {
             return Err("Claude CLI não retornou texto para a conversa.".to_owned());
         }
         if !saw_delta && !has_assistant_text {
-            on_text(&text);
+            on_event(ChatEvent::Text(text.clone()));
         }
 
         Ok(ChatReply {
@@ -412,8 +474,10 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
         let prompt = build_prompt(&session.messages);
         print!("\nassistente> ");
         let _ = io::stdout().flush();
-        match provider.send(&workspace, &prompt, &mut |text| {
-            print!("{text}");
+        match provider.send(&workspace, &prompt, &mut |event| {
+            if let ChatEvent::Text(text) = event {
+                print!("{text}");
+            }
             let _ = io::stdout().flush();
         }) {
             Ok(reply) => {
@@ -621,11 +685,26 @@ pub fn approved_request(workspace: &Path, session_id: &str) -> Result<String, St
     Ok(approval.request)
 }
 
+#[allow(dead_code)]
 pub fn send_message(
     workspace: &Path,
     session: &mut ChatSession,
     message: &str,
     on_text: &mut dyn FnMut(&str),
+) -> Result<ChatReply, String> {
+    let mut on_event = |event| {
+        if let ChatEvent::Text(text) = event {
+            on_text(&text);
+        }
+    };
+    send_message_with_events(workspace, session, message, &mut on_event)
+}
+
+pub fn send_message_with_events(
+    workspace: &Path,
+    session: &mut ChatSession,
+    message: &str,
+    on_event: &mut dyn FnMut(ChatEvent),
 ) -> Result<ChatReply, String> {
     if message.trim().is_empty() {
         return Err("mensagem vazia".to_owned());
@@ -644,7 +723,7 @@ pub fn send_message(
     session.model = provider.model().map(str::to_owned);
     save_session(workspace, session)?;
     let prompt = build_prompt(&session.messages);
-    let reply = provider.send(workspace, &prompt, on_text)?;
+    let reply = provider.send(workspace, &prompt, on_event)?;
     session.messages.push(ChatMessage {
         role: "assistant".to_owned(),
         content: reply.text.clone(),

@@ -171,6 +171,12 @@ ipcMain.handle('agent:run', async (_event, prompt: string) => {
           }
           if (event.event === 'token' && typeof event.data.text === 'string') {
             send({ type: 'text', text: event.data.text });
+          } else if (event.event === 'progress' && typeof event.data.message === 'string') {
+            send({ type: 'progress', message: event.data.message });
+          } else if (event.event === 'tool_start') {
+            send({ type: 'tool_start', id: String(event.data.id ?? ''), name: String(event.data.name ?? 'tool'), input: event.data.input });
+          } else if (event.event === 'tool_end') {
+            send({ type: 'tool_end', id: String(event.data.id ?? ''), ok: event.data.ok === true, output: String(event.data.output ?? '') });
           } else if (event.event === 'done') {
             send({ type: 'done' });
           } else if (event.event === 'error') {
