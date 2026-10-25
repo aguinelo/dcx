@@ -108,6 +108,7 @@ pub struct ClaudeChatProvider {
     binary: OsString,
     backend: Backend,
     model: Option<String>,
+    web_enabled: bool,
 }
 
 impl ClaudeChatProvider {
@@ -135,6 +136,14 @@ impl ClaudeChatProvider {
             binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
             backend,
             model: resolve_model(workspace, backend, None, true),
+            web_enabled: crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
+                .map(|value| {
+                    matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes" | "on"
+                    )
+                })
+                .unwrap_or(false),
         })
     }
 
@@ -167,10 +176,14 @@ impl ChatProvider for ClaudeChatProvider {
                 "--permission-mode",
                 "plan",
             ])
-            .arg("--allowedTools=Read,Glob,Grep")
+            .arg(if self.web_enabled {
+                "--allowedTools=Read,Glob,Grep,WebSearch,WebFetch"
+            } else {
+                "--allowedTools=Read,Glob,Grep"
+            })
             .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit")
             .arg("--append-system-prompt")
-            .arg(system_prompt(workspace))
+            .arg(system_prompt(workspace, self.web_enabled))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -362,15 +375,20 @@ impl ChatProvider for ClaudeChatProvider {
     }
 }
 
-fn system_prompt(workspace: &Path) -> String {
+fn system_prompt(workspace: &Path, web_enabled: bool) -> String {
     format!(
         "Você é o Harness em modo conversa read-only.\n\
          Projeto atual: {}.\n\
          É obrigatório responder em português do Brasil (pt-BR), mesmo que o histórico, os arquivos ou a pergunta estejam em outro idioma. Não responda em inglês, salvo quando o usuário pedir explicitamente.\n\
-         Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. Nunca edite, crie, apague ou execute comandos; não use Bash. Não altere o projeto.\n\
+         Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. {} Nunca edite, crie, apague ou execute comandos; não use Bash. Não altere o projeto.\n\
          Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir implementação, explique que isso exige iniciar um run com contrato e sensores; não escreva arquivos.\n\
          Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
-        workspace.display()
+        workspace.display(),
+        if web_enabled {
+            "Quando a pergunta exigir informação atual ou pesquisa externa, use WebSearch/WebFetch e emita progresso claro antes e depois da busca."
+        } else {
+            "A pesquisa externa está desabilitada nesta sessão."
+        }
     )
 }
 
