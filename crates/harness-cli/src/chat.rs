@@ -133,13 +133,21 @@ impl ClaudeChatProvider {
                 ));
             }
         };
+        let web_enabled = crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false);
         Ok(Self {
             binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
             backend,
             model: resolve_model(workspace, backend, None, true),
             // Web research is performed by the Harness and injected into the
             // prompt, so every model receives the same provider-neutral context.
-            web_enabled: false,
+            web_enabled,
             max_tool_calls: crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
                 .and_then(|value| value.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
@@ -176,11 +184,7 @@ impl ChatProvider for ClaudeChatProvider {
                 "--permission-mode",
                 "plan",
             ])
-            .arg(if self.web_enabled {
-                "--allowedTools=Read,Glob,Grep,WebSearch,WebFetch"
-            } else {
-                "--allowedTools=Read,Glob,Grep"
-            })
+            .arg("--allowedTools=Read,Glob,Grep")
             .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch")
             .arg("--append-system-prompt")
             .arg(system_prompt(workspace, self.web_enabled))
@@ -394,9 +398,9 @@ fn system_prompt(workspace: &Path, web_enabled: bool) -> String {
          Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
         workspace.display(),
         if web_enabled {
-            "Quando a pergunta exigir informação atual ou pesquisa externa, use WebSearch/WebFetch e emita progresso claro antes e depois da busca."
+            "Quando houver contexto marcado como PESQUISA WEB DO HARNESS, use somente essas fontes, cite as URLs e não tente pesquisar novamente. Se esse contexto não existir, diga que a informação atual não foi verificada; nunca invente dados."
         } else {
-            "A pesquisa externa está desabilitada nesta sessão."
+            "A pesquisa externa está desabilitada nesta sessão; não alegue ter pesquisado e não invente dados atuais."
         }
     )
 }
