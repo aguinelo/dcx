@@ -14,6 +14,12 @@ struct ChatRequest {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PromoteRequest {
+    workspace: String,
+    session_id: String,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
@@ -78,12 +84,69 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("");
-    match (method, path) {
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    match (method, route) {
         ("GET", "/health") => respond_json(&mut stream, 200, r#"{"status":"ok"}"#),
-        ("GET", "/sessions") => respond_json(&mut stream, 200, r#"{"sessions":[]}"#),
+        ("GET", "/sessions") => handle_sessions(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
+        ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
+}
+
+fn handle_sessions(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /sessions exige ?workspace=<diretório>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let sessions = chat::list_sessions(&workspace)?;
+    let body = serde_json::to_string(&serde_json::json!({"sessions": sessions}))
+        .map_err(|error| format!("não foi possível serializar sessões: {error}"))?;
+    respond_json(stream, 200, &body)
+}
+
+fn handle_promote(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: PromoteRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let workspace = PathBuf::from(request.workspace);
+    let prompt = chat::request_from_session(&workspace, &request.session_id)?;
+    let body = serde_json::to_string(&serde_json::json!({
+        "status": "ready_for_approval",
+        "session_id": request.session_id,
+        "request": prompt,
+        "next": "inicie o fluxo de run após a aprovação explícita do usuário"
+    }))
+    .map_err(|error| format!("não foi possível serializar promoção: {error}"))?;
+    respond_json(stream, 200, &body)
+}
+
+fn query_value(query: &str, name: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == name).then(|| value.to_owned())
+    })
+}
+
+fn percent_decode(value: &str) -> Result<String, String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return Err("query string contém escape incompleto".to_owned());
+            }
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3])
+                .map_err(|_| "query string inválida".to_owned())?;
+            let byte = u8::from_str_radix(hex, 16)
+                .map_err(|_| "query string contém escape inválido".to_owned())?;
+            decoded.push(byte);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| "query string não é UTF-8".to_owned())
 }
 
 fn handle_chat(stream: &mut TcpStream, body: &str) -> Result<(), String> {
@@ -136,4 +199,27 @@ fn respond_json(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), S
     stream
         .write_all(response.as_bytes())
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_workspace_query_is_decoded() {
+        assert_eq!(
+            query_value("workspace=%2Ftmp%2Fmy%20project", "workspace"),
+            Some("%2Ftmp%2Fmy%20project".to_owned())
+        );
+        assert_eq!(
+            percent_decode("%2Ftmp%2Fmy%20project").expect("decodificar"),
+            "/tmp/my project"
+        );
+    }
+
+    #[test]
+    fn malformed_query_escape_is_rejected() {
+        assert!(percent_decode("%2").is_err());
+        assert!(percent_decode("%GG").is_err());
+    }
 }

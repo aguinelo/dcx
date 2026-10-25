@@ -43,6 +43,17 @@ pub struct ChatSession {
     pub messages: Vec<ChatMessage>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub workspace: PathBuf,
+    pub provider: String,
+    pub model: Option<String>,
+    pub message_count: usize,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+}
+
 #[derive(Debug)]
 pub struct ChatReply {
     pub text: String,
@@ -423,14 +434,32 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
 
 pub fn list(workspace_arg: Option<PathBuf>) -> Result<(), String> {
     let workspace = resolve_workspace(workspace_arg)?;
-    let root = sessions_root(&workspace);
-    if !root.is_dir() {
+    let sessions = list_sessions(&workspace)?;
+    if sessions.is_empty() {
+        let root = sessions_root(&workspace);
         println!("Nenhuma sessão em {}", root.display());
         return Ok(());
     }
-    let mut sessions = Vec::new();
+    println!("Sessões em {}:", sessions_root(&workspace).display());
+    for session in sessions {
+        println!(
+            "  {}  {} mensagem(ns)  {}",
+            session.session_id,
+            session.message_count,
+            format_age(session.updated_at_unix_ms)
+        );
+    }
+    Ok(())
+}
+
+pub fn list_sessions(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
+    let root = sessions_root(workspace);
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
     let entries = fs::read_dir(&root)
         .map_err(|error| format!("não foi possível ler {}: {error}", root.display()))?;
+    let mut sessions = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| format!("sessão inválida: {error}"))?;
         if !entry
@@ -441,27 +470,22 @@ pub fn list(workspace_arg: Option<PathBuf>) -> Result<(), String> {
             continue;
         }
         let path = entry.path().join("session.json");
-        if let Ok(bytes) = fs::read(&path) {
-            if let Ok(session) = serde_json::from_slice::<ChatSession>(&bytes) {
-                sessions.push(session);
-            }
-        }
+        let Ok(bytes) = fs::read(&path) else { continue };
+        let Ok(session) = serde_json::from_slice::<ChatSession>(&bytes) else {
+            continue;
+        };
+        sessions.push(SessionSummary {
+            session_id: session.session_id,
+            workspace: session.workspace,
+            provider: session.provider,
+            model: session.model,
+            message_count: session.messages.len(),
+            created_at_unix_ms: session.created_at_unix_ms,
+            updated_at_unix_ms: session.updated_at_unix_ms,
+        });
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at_unix_ms));
-    if sessions.is_empty() {
-        println!("Nenhuma sessão em {}", root.display());
-        return Ok(());
-    }
-    println!("Sessões em {}:", root.display());
-    for session in sessions {
-        println!(
-            "  {}  {} mensagem(ns)  {}",
-            session.session_id,
-            session.messages.len(),
-            format_age(session.updated_at_unix_ms)
-        );
-    }
-    Ok(())
+    Ok(sessions)
 }
 
 pub fn open_session(workspace: &Path, session_id: Option<&str>) -> Result<ChatSession, String> {
