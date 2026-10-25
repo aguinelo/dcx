@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use serde::Deserialize;
@@ -43,6 +43,17 @@ struct RunInputRequest {
 struct CancelRunRequest {
     workspace: String,
     run_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetConfigRequest {
+    workspace: String,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    web_enabled: Option<bool>,
+    #[serde(default)]
+    max_tool_calls: Option<usize>,
 }
 
 pub fn run(bind: &str) -> Result<(), String> {
@@ -125,6 +136,9 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/runs/events") => handle_run_events(&mut stream, query),
         ("GET", "/projects") => handle_projects(&mut stream, query),
         ("GET", "/runs/artifacts") => handle_artifacts(&mut stream, query),
+        ("GET", "/config") => handle_get_config(&mut stream, query),
+        ("POST", "/config") => handle_set_config(&mut stream, body),
+        ("GET", "/account") => handle_account(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -362,6 +376,66 @@ fn handle_artifacts(stream: &mut TcpStream, query: &str) -> Result<(), String> {
         200,
         &serde_json::json!({"run_id": run_id, "files": files}).to_string(),
     )
+}
+
+fn handle_get_config(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /config exige ?workspace=<diretório>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let config = chat::config(&workspace);
+    respond_json(
+        stream,
+        200,
+        &serde_json::to_string(&config).map_err(|error| error.to_string())?,
+    )
+}
+
+fn handle_set_config(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: SetConfigRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let workspace = PathBuf::from(request.workspace);
+    chat::set_config(
+        &workspace,
+        request.provider,
+        request.web_enabled,
+        request.max_tool_calls,
+    )?;
+    let config = chat::config(&workspace);
+    respond_json(
+        stream,
+        200,
+        &serde_json::to_string(&config).map_err(|error| error.to_string())?,
+    )
+}
+
+fn handle_account(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /account exige ?workspace=<diretório>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let name = git_config(&workspace, "user.name")
+        .or_else(|| std::env::var("USER").ok())
+        .unwrap_or_else(|| "Usuário".to_owned());
+    let email = git_config(&workspace, "user.email");
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"name": name, "email": email}).to_string(),
+    )
+}
+
+fn git_config(workspace: &Path, key: &str) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("config")
+        .arg(key)
+        .current_dir(workspace)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 fn query_value(query: &str, name: &str) -> Option<String> {

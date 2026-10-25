@@ -46,6 +46,12 @@ interface ReplBridge {
   promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }>;
   approve(workspace: string, sessionId: string): Promise<unknown>;
   start(workspace: string, sessionId: string): Promise<{ run_id: string; status: string }>;
+  config(workspace: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
+  setConfig(
+    workspace: string,
+    updates: Partial<{ provider: string; web_enabled: boolean; max_tool_calls: number }>,
+  ): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
+  account(workspace: string): Promise<{ name: string; email?: string }>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;
@@ -278,6 +284,53 @@ function renderThemes(): void {
       return swatch;
     }),
   );
+}
+
+/* ── Account and provider settings ─────────────────────────────── */
+
+function initials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '?';
+  return trimmed.charAt(0).toUpperCase();
+}
+
+function renderAccount(account: { name: string; email?: string }): void {
+  const mark = initials(account.name);
+  el('sidebar-avatar').textContent = mark;
+  el('sidebar-account-name').textContent = account.name;
+  el('settings-avatar').textContent = mark;
+  el('settings-account-name').textContent = account.name;
+  el('settings-account-email').textContent = account.email ?? '';
+}
+
+function renderConfig(config: { provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }): void {
+  for (const input of el<HTMLDivElement>('settings-provider').querySelectorAll<HTMLInputElement>(
+    'input[name="provider"]',
+  )) {
+    input.checked = input.value === config.provider;
+  }
+  el<HTMLInputElement>('settings-web').checked = config.web_enabled;
+  el<HTMLInputElement>('settings-max-tool-calls').value = String(config.max_tool_calls);
+  el('settings-model').textContent = config.model ? `Modelo: ${config.model}` : 'Modelo: via Harness';
+}
+
+async function loadSettings(workspace: string): Promise<void> {
+  try {
+    const [account, config] = await Promise.all([bridge.account(workspace), bridge.config(workspace)]);
+    renderAccount(account);
+    renderConfig(config);
+  } catch (error) {
+    showNotice('Configuração indisponível', error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+async function updateConfig(updates: Partial<{ provider: string; web_enabled: boolean; max_tool_calls: number }>): Promise<void> {
+  try {
+    const config = await bridge.setConfig(currentWorkspace, updates);
+    renderConfig(config);
+  } catch (error) {
+    showNotice('Não foi possível salvar', error instanceof Error ? error.message : String(error), true);
+  }
 }
 
 /* ── Background tasks ────────────────────────────────────────── */
@@ -1081,6 +1134,7 @@ function handleChromeAction(action: string): void {
       return;
     case 'settings':
       el('theme-settings').hidden = false;
+      void loadSettings(currentWorkspace);
       return;
     case 'close-settings':
       el('theme-settings').hidden = true;
@@ -1097,6 +1151,24 @@ function handleChromeAction(action: string): void {
     default:
   }
 }
+
+document.addEventListener('change', (event) => {
+  const target = event.target as HTMLElement;
+
+  if (target.matches('input[name="provider"]')) {
+    void updateConfig({ provider: (target as HTMLInputElement).value });
+    return;
+  }
+  if (target.id === 'settings-web') {
+    void updateConfig({ web_enabled: (target as HTMLInputElement).checked });
+    return;
+  }
+  if (target.id === 'settings-max-tool-calls') {
+    const value = Number.parseInt((target as HTMLInputElement).value, 10);
+    if (Number.isFinite(value) && value > 0) void updateConfig({ max_tool_calls: value });
+    return;
+  }
+});
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
@@ -1148,6 +1220,7 @@ async function loadHarnessData(): Promise<void> {
     renderStaticRegions(workspace);
     const connection = el('connection-state');
     connection.textContent = 'Harness conectado';
+    void loadSettings(workspace);
     const sessions = await bridge.sessions(workspace);
     renderAllConversations(
       sessions.map((session, index) => ({

@@ -233,6 +233,13 @@ ipcMain.handle('harness:session', (_event, workspace: string, sessionId: string)
   getHarnessClient().session(workspace, sessionId),
 );
 ipcMain.handle('harness:projects', (_event, root: string) => getHarnessClient().projects(root));
+ipcMain.handle('harness:config', (_event, workspace: string) => getHarnessClient().config(workspace));
+ipcMain.handle(
+  'harness:setConfig',
+  (_event, workspace: string, updates: Parameters<HarnessClient['setConfig']>[1]) =>
+    getHarnessClient().setConfig(workspace, updates),
+);
+ipcMain.handle('harness:account', (_event, workspace: string) => getHarnessClient().account(workspace));
 ipcMain.handle('harness:promote', (_event, workspace: string, sessionId: string) =>
   getHarnessClient().promote(workspace, sessionId),
 );

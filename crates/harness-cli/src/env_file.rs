@@ -27,6 +27,34 @@ pub fn value(workspace: &Path, name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+/// Writes `updates` into `workspace/.env`, replacing existing `KEY=` lines in
+/// place and appending keys that aren't present yet. Other lines (comments,
+/// unrelated keys) are preserved as-is.
+pub fn set_values(workspace: &Path, updates: &[(&str, String)]) -> Result<(), String> {
+    let path = workspace.join(".env");
+    let original = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = original.lines().map(str::to_owned).collect();
+    let mut remaining: Vec<(&str, String)> = updates.to_vec();
+
+    for line in lines.iter_mut() {
+        let key = line.split('=').next().unwrap_or("").trim();
+        if let Some(index) = remaining.iter().position(|(name, _)| *name == key) {
+            let (name, value) = remaining.remove(index);
+            *line = format!("{name}={value}");
+        }
+    }
+    for (name, value) in remaining {
+        lines.push(format!("{name}={value}"));
+    }
+
+    let mut content = lines.join("\n");
+    if !content.is_empty() {
+        content.push('\n');
+    }
+    std::fs::write(&path, content)
+        .map_err(|error| format!("não foi possível gravar {}: {error}", path.display()))
+}
+
 fn environment_path(workspace: &Path) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("HARNESS_ENV_FILE") {
         return Some(PathBuf::from(path));

@@ -57,7 +57,7 @@
         </div>
 
         <footer class="sidebar__footer">
-          <button class="account"><span class="avatar">A</span> <span>Aguinelo</span> <span class="muted">Max</span> <span class="chev">▾</span></button>
+          <button class="account"><span class="avatar" id="sidebar-avatar">?</span> <span id="sidebar-account-name">—</span> <span class="chev">▾</span></button>
           <button class="iconbtn" data-action="settings" title="Configurações">⚙</button>
         </footer>
       </aside>
@@ -149,8 +149,51 @@
 
     <div class="theme-settings" id="theme-settings" hidden>
       <div class="theme-settings__card">
-        <h2>Tema</h2>
-        <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
+        <h2>Configurações</h2>
+
+        <section class="settings-section">
+          <h3>Conta</h3>
+          <div class="settings-account" id="settings-account">
+            <span class="avatar" id="settings-avatar">?</span>
+            <div class="settings-account__info">
+              <div class="settings-account__name" id="settings-account-name">—</div>
+              <div class="settings-account__email muted" id="settings-account-email"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Provedor</h3>
+          <div class="settings-row" id="settings-provider" role="radiogroup" aria-label="Provedor">
+            <label class="settings-option">
+              <input type="radio" name="provider" value="claude" />
+              <span>Claude</span>
+            </label>
+            <label class="settings-option">
+              <input type="radio" name="provider" value="minimax" />
+              <span>MiniMax</span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <label class="settings-option settings-option--toggle">
+              <input type="checkbox" id="settings-web" />
+              <span>Busca web ativada</span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <label class="settings-option settings-option--field">
+              <span>Limite de chamadas de ferramenta</span>
+              <input type="number" id="settings-max-tool-calls" min="1" max="50" />
+            </label>
+          </div>
+          <div class="settings-row muted" id="settings-model"></div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Tema</h3>
+          <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
+        </section>
+
         <button class="btn" data-action="close-settings">Fechar</button>
       </div>
     </div>

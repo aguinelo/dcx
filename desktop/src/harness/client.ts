@@ -38,6 +38,18 @@ export interface HarnessEvent {
   created_at_unix_ms?: number;
 }
 
+export interface HarnessConfig {
+  provider: string;
+  model?: string;
+  web_enabled: boolean;
+  max_tool_calls: number;
+}
+
+export interface HarnessAccount {
+  name: string;
+  email?: string;
+}
+
 export interface HarnessClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -55,6 +67,21 @@ export class HarnessClient {
 
   async health(): Promise<{ status: string }> {
     return this.get('/health');
+  }
+
+  async config(workspace: string): Promise<HarnessConfig> {
+    return this.get(`/config?workspace=${encodeURIComponent(workspace)}`);
+  }
+
+  async setConfig(
+    workspace: string,
+    updates: Partial<Pick<HarnessConfig, 'provider' | 'web_enabled' | 'max_tool_calls'>>,
+  ): Promise<HarnessConfig> {
+    return this.post('/config', { workspace, ...updates });
+  }
+
+  async account(workspace: string): Promise<HarnessAccount> {
+    return this.get(`/account?workspace=${encodeURIComponent(workspace)}`);
   }
 
   async projects(root: string): Promise<HarnessProject[]> {

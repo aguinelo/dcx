@@ -164,6 +164,77 @@ impl ClaudeChatProvider {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct ChatConfig {
+    pub provider: String,
+    pub model: Option<String>,
+    pub web_enabled: bool,
+    pub max_tool_calls: usize,
+}
+
+/// Reads the chat configuration for `workspace` without requiring the
+/// provider binary to be installed, so the settings UI can display it.
+pub fn config(workspace: &Path) -> ChatConfig {
+    let provider = crate::env_file::value(workspace, "HARNESS_CHAT_PROVIDER")
+        .unwrap_or_else(|| "claude".to_owned())
+        .to_ascii_lowercase();
+    let backend = match provider.as_str() {
+        "minimax" => Backend::Minimax,
+        _ => Backend::Anthropic,
+    };
+    let web_enabled = crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false);
+    let max_tool_calls = crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8);
+    ChatConfig {
+        provider: backend.provider_name().to_owned(),
+        model: resolve_model(workspace, backend, None, true),
+        web_enabled,
+        max_tool_calls,
+    }
+}
+
+/// Persists chat configuration into `workspace/.env`. `None` fields are left
+/// untouched.
+pub fn set_config(
+    workspace: &Path,
+    provider: Option<String>,
+    web_enabled: Option<bool>,
+    max_tool_calls: Option<usize>,
+) -> Result<(), String> {
+    let mut updates: Vec<(&str, String)> = Vec::new();
+    if let Some(provider) = provider {
+        let normalized = provider.to_ascii_lowercase();
+        if normalized != "claude" && normalized != "minimax" {
+            return Err(format!(
+                "provider desconhecido: {normalized}; use claude ou minimax"
+            ));
+        }
+        updates.push(("HARNESS_CHAT_PROVIDER", normalized));
+    }
+    if let Some(web_enabled) = web_enabled {
+        updates.push((
+            "HARNESS_CHAT_WEB",
+            if web_enabled { "1" } else { "0" }.to_owned(),
+        ));
+    }
+    if let Some(max_tool_calls) = max_tool_calls {
+        if max_tool_calls == 0 {
+            return Err("max_tool_calls deve ser maior que zero".to_owned());
+        }
+        updates.push(("HARNESS_CHAT_MAX_TOOL_CALLS", max_tool_calls.to_string()));
+    }
+    crate::env_file::set_values(workspace, &updates)
+}
+
 impl ChatProvider for ClaudeChatProvider {
     fn send(
         &mut self,
