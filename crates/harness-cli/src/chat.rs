@@ -133,18 +133,24 @@ impl ClaudeChatProvider {
                 ));
             }
         };
+        let web_enabled = crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false);
+        if web_enabled && backend == Backend::Minimax {
+            return Err(
+                "HARNESS_CHAT_WEB=1 exige HARNESS_CHAT_PROVIDER=claude; o MiniMax não suporta as ferramentas web do Claude CLI".to_owned(),
+            );
+        }
         Ok(Self {
             binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
             backend,
             model: resolve_model(workspace, backend, None, true),
-            web_enabled: crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
-                .map(|value| {
-                    matches!(
-                        value.trim().to_ascii_lowercase().as_str(),
-                        "1" | "true" | "yes" | "on"
-                    )
-                })
-                .unwrap_or(false),
+            web_enabled,
             max_tool_calls: crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
                 .and_then(|value| value.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
