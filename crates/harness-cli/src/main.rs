@@ -1,6 +1,8 @@
+mod chat;
 mod claude;
 mod codex;
 mod demo;
+mod env_file;
 mod events;
 mod interactive;
 mod lock;
@@ -13,6 +15,10 @@ mod workspace;
 use harness_engine::RunState;
 
 fn main() {
+    if let Err(error) = env_file::load() {
+        eprintln!("Falha ao carregar o ambiente: {error}");
+        std::process::exit(1);
+    }
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("states") if args.next().is_none() => {
@@ -23,6 +29,53 @@ fn main() {
         Some("schemas") => {
             if let Err(error) = schemas::run(args) {
                 eprintln!("Erro ao processar schemas: {error}");
+                std::process::exit(1);
+            }
+        }
+        Some("chat") => {
+            let mut workspace = None;
+            let mut session = None;
+            let mut list = false;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--workspace" => {
+                        let Some(value) = args.next() else {
+                            eprintln!(
+                                "Uso: harness chat [--workspace <dir>] [--session <id> | --list]"
+                            );
+                            std::process::exit(2);
+                        };
+                        workspace = Some(std::path::PathBuf::from(value));
+                    }
+                    "--session" => {
+                        let Some(value) = args.next() else {
+                            eprintln!(
+                                "Uso: harness chat [--workspace <dir>] [--session <id> | --list]"
+                            );
+                            std::process::exit(2);
+                        };
+                        session = Some(value);
+                    }
+                    "--list" => list = true,
+                    _ => {
+                        eprintln!(
+                            "Uso: harness chat [--workspace <dir>] [--session <id> | --list]"
+                        );
+                        std::process::exit(2);
+                    }
+                }
+            }
+            if list && session.is_some() {
+                eprintln!("Uso: harness chat --list não aceita --session");
+                std::process::exit(2);
+            }
+            let result = if list {
+                chat::list(workspace)
+            } else {
+                chat::run(workspace, session)
+            };
+            if let Err(error) = result {
+                eprintln!("Falha no chat: {error}");
                 std::process::exit(1);
             }
         }
@@ -132,7 +185,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|resume --run <run_id>|dispute --run <run_id> --sensor <sensor_id> --reason <motivo>|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
+                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|resume --run <run_id>|dispute --run <run_id> --sensor <sensor_id> --reason <motivo>|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
             );
             std::process::exit(2);
         }

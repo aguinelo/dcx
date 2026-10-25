@@ -47,6 +47,13 @@ pub fn copy_project(
     copy_directory(source, destination, &mut total, &excluded)
 }
 
+fn is_environment_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name == ".env" || (name.starts_with(".env.") && name != ".env.example")
+}
+
 fn copy_directory(
     source: &Path,
     destination: &Path,
@@ -58,9 +65,8 @@ fn copy_directory(
     for entry in entries {
         let entry = entry.map_err(|error| format!("cannot read project entry: {error}"))?;
         let name = entry.file_name();
-        if SKIPPED
-            .iter()
-            .any(|skipped| name.to_string_lossy() == *skipped)
+        let name = name.to_string_lossy();
+        if SKIPPED.iter().any(|skipped| name == *skipped) || is_environment_file(Path::new(&*name))
         {
             continue;
         }
@@ -79,7 +85,7 @@ fn copy_directory(
         if metadata.file_type().is_symlink() {
             continue;
         }
-        let target = destination.join(&name);
+        let target = destination.join(&*name);
         if metadata.is_dir() {
             fs::create_dir_all(&target).map_err(|error| {
                 format!("cannot create directory {}: {error}", target.display())
@@ -123,6 +129,9 @@ pub fn apply_changes(
                 .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
         {
             return Err(format!("refusing to apply unsafe path: {path}"));
+        }
+        if is_environment_file(relative) {
+            return Err(format!("refusing to apply environment file: {path}"));
         }
         relatives.push(relative.to_path_buf());
     }
@@ -307,6 +316,21 @@ mod tests {
     }
 
     #[test]
+    fn copy_skips_environment_files() {
+        let source = unique_dir("copy-env-source");
+        let destination = unique_dir("copy-env-destination");
+        fs::write(source.join(".env"), "SECRET=1\n").expect(".env");
+        fs::write(source.join(".env.local"), "SECRET=2\n").expect(".env.local");
+        fs::write(source.join(".env.example"), "SECRET=\n").expect(".env.example");
+
+        copy_project(&source, &destination, &[]).expect("copiar projeto");
+
+        assert!(!destination.join(".env").exists());
+        assert!(!destination.join(".env.local").exists());
+        assert!(destination.join(".env.example").is_file());
+    }
+
+    #[test]
     fn failed_apply_rolls_back_files_already_copied() {
         let original = unique_dir("apply-rollback-original");
         let executed = unique_dir("apply-rollback-executed");
@@ -355,5 +379,6 @@ mod tests {
         assert!(!original.join("removed.py").exists());
         assert_eq!(applied.len(), 3);
         assert!(apply_changes(&original, &executed, &["../escape.py".into()]).is_err());
+        assert!(apply_changes(&original, &executed, &[".env".into()]).is_err());
     }
 }

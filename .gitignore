@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 *.py[cod]
 .DS_Store
+.env
+.env.*
+!.env.example

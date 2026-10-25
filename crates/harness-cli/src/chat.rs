@@ -1,0 +1,673 @@
+use std::ffi::OsString;
+use std::fs;
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+const SESSION_SCHEMA_VERSION: u32 = 1;
+const MAX_HISTORY_MESSAGES: usize = 40;
+const MAX_HISTORY_CHARS: usize = 48_000;
+const MAX_MESSAGE_CHARS: usize = 12_000;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+    pub created_at_unix_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatSession {
+    pub schema_version: u32,
+    pub session_id: String,
+    pub workspace: PathBuf,
+    pub mode: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug)]
+pub struct ChatReply {
+    pub text: String,
+    pub cost_usd: Option<f64>,
+    pub duration_ms: u64,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+pub trait ChatProvider {
+    fn send(
+        &mut self,
+        workspace: &Path,
+        prompt: &str,
+        on_text: &mut dyn FnMut(&str),
+    ) -> Result<ChatReply, String>;
+}
+
+pub struct ClaudeChatProvider {
+    binary: OsString,
+    model: Option<String>,
+}
+
+impl ClaudeChatProvider {
+    pub fn new() -> Self {
+        Self {
+            binary: std::env::var_os("HARNESS_CLAUDE_BIN").unwrap_or_else(|| "claude".into()),
+            model: std::env::var("HARNESS_CHAT_MODEL")
+                .ok()
+                .or_else(|| std::env::var("HARNESS_CLAUDE_MODEL").ok()),
+        }
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+}
+
+impl ChatProvider for ClaudeChatProvider {
+    fn send(
+        &mut self,
+        workspace: &Path,
+        prompt: &str,
+        on_text: &mut dyn FnMut(&str),
+    ) -> Result<ChatReply, String> {
+        let mut command = Command::new(&self.binary);
+        command
+            .current_dir(workspace)
+            .args([
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--no-session-persistence",
+                "--permission-mode",
+                "plan",
+            ])
+            .arg("--allowedTools=Read,Glob,Grep")
+            .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit")
+            .arg("--append-system-prompt")
+            .arg(system_prompt(workspace))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(model) = &self.model {
+            command.args(["--model", model]);
+        }
+        if let Some(key) = crate::env_file::api_key(workspace) {
+            command.env("ANTHROPIC_API_KEY", key);
+        }
+        command.arg(prompt);
+
+        let started = Instant::now();
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("não foi possível iniciar Claude CLI: {error}"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("Claude CLI não forneceu stdout")?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or("Claude CLI não forneceu stderr")?;
+        let stderr_handle = std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = BufReader::new(stderr).read_to_string(&mut text);
+            text
+        });
+
+        let mut streamed = String::new();
+        let mut assistant_text = String::new();
+        let mut result_text = None;
+        let mut saw_delta = false;
+        let mut is_error = false;
+        let mut error_message = None;
+        let mut cost_usd = None;
+        let mut duration_ms = None;
+        let mut input_tokens = None;
+        let mut output_tokens = None;
+        let mut parse_error = None;
+
+        for line in BufReader::new(stdout).lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    parse_error = Some(format!("não foi possível ler Claude CLI: {error}"));
+                    break;
+                }
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: Value = match serde_json::from_str(&line) {
+                Ok(value) => value,
+                Err(error) => {
+                    parse_error = Some(format!("Claude CLI retornou evento inválido: {error}"));
+                    break;
+                }
+            };
+            match value.get("type").and_then(Value::as_str) {
+                Some("stream_event") => {
+                    if let Some(text) = delta_text(&value) {
+                        saw_delta = true;
+                        streamed.push_str(text);
+                        on_text(text);
+                    }
+                }
+                Some("assistant") => {
+                    if let Some(text) = message_text(&value) {
+                        assistant_text.push_str(&text);
+                        if !saw_delta {
+                            on_text(&text);
+                        }
+                    }
+                }
+                Some("result") => {
+                    if value.get("is_error").and_then(Value::as_bool) == Some(true) {
+                        is_error = true;
+                        error_message = value
+                            .get("result")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                    }
+                    result_text = value
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    cost_usd = value.get("total_cost_usd").and_then(Value::as_f64);
+                    duration_ms = value.get("duration_ms").and_then(Value::as_u64);
+                    input_tokens = value
+                        .get("usage")
+                        .and_then(|usage| usage.get("input_tokens"))
+                        .and_then(Value::as_u64);
+                    output_tokens = value
+                        .get("usage")
+                        .and_then(|usage| usage.get("output_tokens"))
+                        .and_then(Value::as_u64);
+                }
+                _ => {}
+            }
+        }
+
+        let status = child
+            .wait()
+            .map_err(|error| format!("não foi possível aguardar Claude CLI: {error}"))?;
+        let stderr = stderr_handle.join().unwrap_or_default();
+        if let Some(error) = parse_error {
+            return Err(error);
+        }
+        if !status.success() {
+            return Err(format!(
+                "Claude CLI encerrou com {status}: {}",
+                summarize_stderr(&stderr)
+            ));
+        }
+        if is_error {
+            return Err(format!(
+                "Claude CLI recusou a conversa: {}",
+                error_message.as_deref().unwrap_or("sem detalhes")
+            ));
+        }
+
+        let has_assistant_text = !assistant_text.trim().is_empty();
+        let text = if has_assistant_text {
+            assistant_text
+        } else if !streamed.is_empty() {
+            streamed
+        } else {
+            result_text.unwrap_or_default()
+        };
+        if text.trim().is_empty() {
+            return Err("Claude CLI não retornou texto para a conversa.".to_owned());
+        }
+        if !saw_delta && !has_assistant_text {
+            on_text(&text);
+        }
+
+        Ok(ChatReply {
+            text,
+            cost_usd,
+            duration_ms: duration_ms.unwrap_or_else(|| started.elapsed().as_millis() as u64),
+            input_tokens,
+            output_tokens,
+        })
+    }
+}
+
+fn system_prompt(workspace: &Path) -> String {
+    format!(
+        "Você é o Harness em modo conversa read-only.\n\
+         Projeto atual: {}.\n\
+         Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. Nunca edite, crie, apague ou execute comandos; não use Bash. Não altere o projeto.\n\
+         Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir implementação, explique que isso exige iniciar um run com contrato e sensores; não escreva arquivos.\n\
+         Responda no idioma do usuário, de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
+        workspace.display()
+    )
+}
+
+fn delta_text(value: &Value) -> Option<&str> {
+    let event = value.get("event")?;
+    if event.get("type")?.as_str()? != "content_block_delta" {
+        return None;
+    }
+    let delta = event.get("delta")?;
+    if delta.get("type")?.as_str()? != "text_delta" {
+        return None;
+    }
+    delta.get("text")?.as_str()
+}
+
+fn message_text(value: &Value) -> Option<String> {
+    let content = value.get("message")?.get("content")?.as_array()?;
+    let text = content
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("");
+    (!text.is_empty()).then_some(text)
+}
+
+fn summarize_stderr(stderr: &str) -> String {
+    let diagnostics = stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if diagnostics.is_empty() {
+        "diagnóstico indisponível".to_owned()
+    } else {
+        diagnostics
+    }
+}
+
+pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result<(), String> {
+    let workspace = resolve_workspace(workspace_arg)?;
+    crate::env_file::load_for_workspace(&workspace)?;
+    let mut session = match session_id {
+        Some(session_id) => load_session(&workspace, &session_id)?,
+        None => new_session(&workspace)?,
+    };
+    let mut provider = ClaudeChatProvider::new();
+    session.workspace = workspace.clone();
+    session.mode = "explore".to_owned();
+    session.provider = "claude".to_owned();
+    session.model = provider.model().map(str::to_owned);
+    save_session(&workspace, &mut session)?;
+
+    println!("Harness chat — modo read-only");
+    println!("Projeto: {}", workspace.display());
+    println!("Sessão: {}", session.session_id);
+    println!("Digite /help para comandos e /exit para sair.\n");
+
+    while let Some(input) = read_line("você> ")? {
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        match input {
+            "/exit" | "/quit" | "/sair" => break,
+            "/help" => {
+                println!(
+                    "/exit  encerra a sessão\n\
+                     /session  mostra o id e o caminho da sessão\n\
+                     /help  mostra esta ajuda"
+                );
+                continue;
+            }
+            "/session" => {
+                println!("Sessão: {}", session.session_id);
+                println!(
+                    "Arquivo: {}",
+                    session_path(&workspace, &session.session_id).display()
+                );
+                continue;
+            }
+            command if command.starts_with('/') => {
+                println!("Comando desconhecido: {command}. Use /help.");
+                continue;
+            }
+            _ => {}
+        }
+
+        session.messages.push(ChatMessage {
+            role: "user".to_owned(),
+            content: input.to_owned(),
+            created_at_unix_ms: now_ms(),
+            cost_usd: None,
+            duration_ms: None,
+            input_tokens: None,
+            output_tokens: None,
+        });
+        save_session(&workspace, &mut session)?;
+
+        let prompt = build_prompt(&session.messages);
+        print!("\nassistente> ");
+        let _ = io::stdout().flush();
+        match provider.send(&workspace, &prompt, &mut |text| {
+            print!("{text}");
+            let _ = io::stdout().flush();
+        }) {
+            Ok(reply) => {
+                println!();
+                if let Some(cost) = reply.cost_usd {
+                    eprintln!("[chat: {} ms, US${cost:.4}]", reply.duration_ms);
+                } else {
+                    eprintln!("[chat: {} ms]", reply.duration_ms);
+                }
+                session.messages.push(ChatMessage {
+                    role: "assistant".to_owned(),
+                    content: reply.text,
+                    created_at_unix_ms: now_ms(),
+                    cost_usd: reply.cost_usd,
+                    duration_ms: Some(reply.duration_ms),
+                    input_tokens: reply.input_tokens,
+                    output_tokens: reply.output_tokens,
+                });
+                save_session(&workspace, &mut session)?;
+            }
+            Err(error) => {
+                println!();
+                eprintln!("Erro: {error}");
+            }
+        }
+    }
+
+    save_session(&workspace, &mut session)?;
+    println!(
+        "\nSessão salva em {}",
+        session_path(&workspace, &session.session_id).display()
+    );
+    Ok(())
+}
+
+pub fn list(workspace_arg: Option<PathBuf>) -> Result<(), String> {
+    let workspace = resolve_workspace(workspace_arg)?;
+    let root = sessions_root(&workspace);
+    if !root.is_dir() {
+        println!("Nenhuma sessão em {}", root.display());
+        return Ok(());
+    }
+    let mut sessions = Vec::new();
+    let entries = fs::read_dir(&root)
+        .map_err(|error| format!("não foi possível ler {}: {error}", root.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("sessão inválida: {error}"))?;
+        if !entry
+            .file_type()
+            .map_err(|error| format!("sessão inválida: {error}"))?
+            .is_dir()
+        {
+            continue;
+        }
+        let path = entry.path().join("session.json");
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(session) = serde_json::from_slice::<ChatSession>(&bytes) {
+                sessions.push(session);
+            }
+        }
+    }
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at_unix_ms));
+    if sessions.is_empty() {
+        println!("Nenhuma sessão em {}", root.display());
+        return Ok(());
+    }
+    println!("Sessões em {}:", root.display());
+    for session in sessions {
+        println!(
+            "  {}  {} mensagem(ns)  {}",
+            session.session_id,
+            session.messages.len(),
+            format_age(session.updated_at_unix_ms)
+        );
+    }
+    Ok(())
+}
+
+fn resolve_workspace(workspace_arg: Option<PathBuf>) -> Result<PathBuf, String> {
+    let path = match workspace_arg {
+        Some(path) => path,
+        None => std::env::current_dir()
+            .map_err(|error| format!("não foi possível obter o diretório atual: {error}"))?,
+    };
+    let workspace = fs::canonicalize(&path)
+        .map_err(|error| format!("não foi possível abrir {}: {error}", path.display()))?;
+    if !workspace.is_dir() {
+        return Err(format!("{} não é um diretório", workspace.display()));
+    }
+    Ok(workspace)
+}
+
+fn new_session(workspace: &Path) -> Result<ChatSession, String> {
+    let timestamp = now_ms();
+    Ok(ChatSession {
+        schema_version: SESSION_SCHEMA_VERSION,
+        session_id: new_session_id(),
+        workspace: workspace.to_path_buf(),
+        mode: "explore".to_owned(),
+        provider: "claude".to_owned(),
+        model: None,
+        created_at_unix_ms: timestamp,
+        updated_at_unix_ms: timestamp,
+        messages: Vec::new(),
+    })
+}
+
+fn load_session(workspace: &Path, session_id: &str) -> Result<ChatSession, String> {
+    validate_session_id(session_id)?;
+    let path = session_path(workspace, session_id);
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("sessão {} não encontrada: {error}", path.display()))?;
+    let mut session: ChatSession = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("sessão {} inválida: {error}", path.display()))?;
+    if session.schema_version != SESSION_SCHEMA_VERSION {
+        return Err(format!(
+            "sessão {} usa schema_version {}; esperado {}",
+            session.session_id, session.schema_version, SESSION_SCHEMA_VERSION
+        ));
+    }
+    if session.session_id != session_id {
+        return Err(format!(
+            "sessão {} contém id divergente {}",
+            path.display(),
+            session.session_id
+        ));
+    }
+    if let Some(message) = session
+        .messages
+        .iter()
+        .find(|message| message.role != "user" && message.role != "assistant")
+    {
+        return Err(format!("sessão contém papel inválido: {}", message.role));
+    }
+    session.workspace = workspace.to_path_buf();
+    Ok(session)
+}
+
+fn save_session(workspace: &Path, session: &mut ChatSession) -> Result<(), String> {
+    session.updated_at_unix_ms = now_ms();
+    let directory = sessions_root(workspace).join(&session.session_id);
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("não foi possível criar {}: {error}", directory.display()))?;
+    let path = directory.join("session.json");
+    let temporary = directory.join("session.json.tmp");
+    let bytes = serde_json::to_vec_pretty(session)
+        .map_err(|error| format!("não foi possível serializar a sessão: {error}"))?;
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("não foi possível salvar {}: {error}", temporary.display()))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("não foi possível publicar {}: {error}", path.display()))
+}
+
+fn sessions_root(workspace: &Path) -> PathBuf {
+    workspace.join(".harness").join("sessions")
+}
+
+fn session_path(workspace: &Path, session_id: &str) -> PathBuf {
+    sessions_root(workspace)
+        .join(session_id)
+        .join("session.json")
+}
+
+fn validate_session_id(session_id: &str) -> Result<(), String> {
+    if session_id.is_empty()
+        || session_id.len() > 128
+        || session_id == "."
+        || session_id == ".."
+        || !session_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "-_.".contains(character))
+    {
+        return Err(format!("id de sessão inválido: {session_id}"));
+    }
+    Ok(())
+}
+
+fn new_session_id() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("chat-{}-{timestamp}", std::process::id())
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+fn format_age(updated_at_unix_ms: u64) -> String {
+    let seconds = now_ms().saturating_sub(updated_at_unix_ms) / 1_000;
+    if seconds < 60 {
+        format!("há {seconds}s")
+    } else if seconds < 3_600 {
+        format!("há {}min", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("há {}h", seconds / 3_600)
+    } else {
+        format!("há {}d", seconds / 86_400)
+    }
+}
+
+fn read_line(prompt: &str) -> Result<Option<String>, String> {
+    print!("{prompt}");
+    io::stdout()
+        .flush()
+        .map_err(|error| format!("não foi possível escrever no terminal: {error}"))?;
+    let mut line = String::new();
+    let read = io::stdin()
+        .read_line(&mut line)
+        .map_err(|error| format!("não foi possível ler do terminal: {error}"))?;
+    if read == 0 {
+        return Ok(None);
+    }
+    Ok(Some(line.trim_end_matches(['\n', '\r']).to_owned()))
+}
+
+fn build_prompt(messages: &[ChatMessage]) -> String {
+    let mut selected = Vec::new();
+    let mut characters = 0;
+    for message in messages.iter().rev() {
+        if selected.len() >= MAX_HISTORY_MESSAGES {
+            break;
+        }
+        let content = truncate_chars(&message.content, MAX_MESSAGE_CHARS);
+        let size = content.chars().count() + 16;
+        if !selected.is_empty() && characters + size > MAX_HISTORY_CHARS {
+            break;
+        }
+        characters += size;
+        selected.push((role_label(&message.role).to_owned(), content));
+    }
+    selected.reverse();
+
+    let mut prompt = String::from("Histórico da conversa:\n");
+    if selected.len() < messages.len() {
+        prompt.push_str("(mensagens antigas omitidas)\n");
+    }
+    for (role, content) in selected {
+        prompt.push_str(&role);
+        prompt.push_str(": ");
+        prompt.push_str(&content);
+        prompt.push('\n');
+    }
+    prompt.push_str("\nResponda à última mensagem do usuário.");
+    prompt
+}
+
+fn role_label(role: &str) -> &str {
+    if role == "assistant" {
+        "Assistente"
+    } else {
+        "Usuário"
+    }
+}
+
+fn truncate_chars(value: &str, maximum: usize) -> String {
+    if value.chars().count() <= maximum {
+        return value.to_owned();
+    }
+    let mut truncated = value.chars().take(maximum).collect::<String>();
+    truncated.push('…');
+    truncated
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_ids_reject_path_traversal() {
+        assert!(validate_session_id("../escape").is_err());
+        assert!(validate_session_id("a/b").is_err());
+        assert!(validate_session_id(".").is_err());
+        assert!(validate_session_id("chat-123").is_ok());
+    }
+
+    #[test]
+    fn prompt_keeps_recent_messages_and_labels_roles() {
+        let messages = vec![
+            ChatMessage {
+                role: "user".to_owned(),
+                content: "primeira".to_owned(),
+                created_at_unix_ms: 1,
+                cost_usd: None,
+                duration_ms: None,
+                input_tokens: None,
+                output_tokens: None,
+            },
+            ChatMessage {
+                role: "assistant".to_owned(),
+                content: "segunda".to_owned(),
+                created_at_unix_ms: 2,
+                cost_usd: None,
+                duration_ms: None,
+                input_tokens: None,
+                output_tokens: None,
+            },
+        ];
+        let prompt = build_prompt(&messages);
+        assert!(prompt.contains("Usuário: primeira"));
+        assert!(prompt.contains("Assistente: segunda"));
+        assert!(prompt.contains("Responda à última mensagem do usuário."));
+    }
+}

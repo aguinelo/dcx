@@ -441,6 +441,7 @@ mod tests {
         SCHEMA_VERSION, SensorImplementation, SensorKind, SensorScript, SensorSpec, SensorSuite,
         SensorType, SensorVisibility,
     };
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn suite() -> SensorSuite {
         SensorSuite {
@@ -469,12 +470,14 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
+        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "harness-sensors-test-{}-{nanos}-{name}",
+            "harness-sensors-test-{}-{nanos}-{sequence}-{name}",
             std::process::id()
         ));
         fs::create_dir_all(&path).expect("create temp dir");

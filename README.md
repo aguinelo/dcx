@@ -58,6 +58,31 @@ If the run is approved, only the changed files are copied back into the project 
 
 If a sensor looks wrong, `harness dispute --run <run_id> --sensor <sensor_id> --reason "<motivo>"` asks the human to accept or reject the dispute. Acceptance re-authors only that sensor, regenerates its lock and implementation artifacts, and leaves the rest of the suite untouched; run `harness resume` afterwards.
 
+## Conversa read-only
+
+Start a free conversation about the current project, without a contract, sensors, or writes:
+
+```sh
+cargo run -p harness-cli -- chat
+```
+
+The chat keeps a persistent session under `.harness/sessions/<session_id>/session.json`, streams the assistant response, and uses Claude in plan mode with only `Read`, `Glob`, and `Grep`; `Bash`, `Edit`, `Write`, and `NotebookEdit` are explicitly denied. It can discuss architecture and inspect files, but it cannot change the project. Use `/help`, `/session`, and `/exit` inside the chat.
+
+Resume a session or list the project's sessions:
+
+```sh
+cargo run -p harness-cli -- chat --session <session_id>
+cargo run -p harness-cli -- chat --list
+```
+
+Use `--workspace <dir>` to point at another project. `HARNESS_CHAT_MODEL` (or `HARNESS_CLAUDE_MODEL`) selects the model, and `HARNESS_CLAUDE_BIN` overrides the Claude executable. To implement something discussed in the chat, start a `run --request`; the chat itself is intentionally read-only.
+
 `harness run --job-02` is the adversarial benchmark: a shortcut passes the visible step but fails the hidden sensors in the integration step. The roadmap for all rounds is in `docs/roadmap.md`.
 
 Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. With Codex, each falls back to `HARNESS_CODEX_MODEL` or the CLI default; with Claude, to `HARNESS_CLAUDE_MODEL` or the CLI default. Set `HARNESS_CLAUDE_BIN` to override the Claude executable.
+
+## Ambiente e segredos
+
+`harness` carrega `.env` do diretório atual antes de ler a configuração; `harness chat --workspace <dir>` também carrega o `.env` daquele projeto. Use `HARNESS_ENV_FILE=<arquivo>` para apontar outro arquivo explicitamente. A `ANTHROPIC_API_KEY` encontrada no `.env` é aplicada diretamente ao processo do Claude, então ela funciona mesmo se houver uma chave antiga exportada no shell; as demais variáveis seguem a precedência normal do shell sobre o arquivo.
+
+O `.env` é ignorado pelo Git, não é copiado para o workspace isolado de um run e não pode ser aplicado de volta pelo merge gate, então chaves como `ANTHROPIC_API_KEY` podem ficar nele sem serem enviadas ao executor. `.env.example` continua versionável.

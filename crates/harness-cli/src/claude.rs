@@ -73,6 +73,9 @@ impl ClaudeCli {
         if let Some(model) = &self.model {
             command.args(["--model", model]);
         }
+        if let Some(key) = crate::env_file::api_key(workspace) {
+            command.env("ANTHROPIC_API_KEY", key);
+        }
         command.arg(prompt);
 
         let started = Instant::now();
