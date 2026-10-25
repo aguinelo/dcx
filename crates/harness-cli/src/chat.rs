@@ -471,6 +471,32 @@ pub fn open_session(workspace: &Path, session_id: Option<&str>) -> Result<ChatSe
     }
 }
 
+/// Converts an exploratory session into the request consumed by the normal
+/// contract/sensor/run flow. This does not execute anything or modify files.
+pub fn request_from_session(workspace: &Path, session_id: &str) -> Result<String, String> {
+    let session = load_session(workspace, session_id)?;
+    let request = session
+        .messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .map(|message| message.content.trim())
+        .filter(|message| !message.is_empty())
+        .collect::<Vec<_>>();
+    if request.is_empty() {
+        return Err("a sessão não contém mensagens do usuário para promover".to_owned());
+    }
+    let mut prompt =
+        "Promover esta conversa exploratória para um projeto implementável. ".to_owned();
+    prompt.push_str(
+        "Preserve as decisões e restrições discutidas; valide o que ainda estiver ambíguo.\n\n",
+    );
+    prompt.push_str("Mensagens do usuário:\n");
+    for (index, message) in request.iter().enumerate() {
+        prompt.push_str(&format!("{}. {}\n", index + 1, message));
+    }
+    Ok(prompt)
+}
+
 pub fn send_message(
     workspace: &Path,
     session: &mut ChatSession,
@@ -736,5 +762,36 @@ mod tests {
         assert!(prompt.contains("Usuário: primeira"));
         assert!(prompt.contains("Assistente: segunda"));
         assert!(prompt.contains("Responda à última mensagem do usuário."));
+    }
+
+    #[test]
+    fn request_from_session_keeps_user_decisions_without_executing() {
+        let workspace = std::env::temp_dir().join(format!("harness-promote-{}", new_session_id()));
+        fs::create_dir_all(&workspace).expect("workspace");
+        let mut session = new_session(&workspace).expect("sessão");
+        for (role, content) in [
+            ("user", "Construir um conversor CSV para JSON"),
+            ("assistant", "Use streaming"),
+            ("user", "Preservar campos entre aspas"),
+        ] {
+            session.messages.push(ChatMessage {
+                role: role.to_owned(),
+                content: content.to_owned(),
+                created_at_unix_ms: now_ms(),
+                cost_usd: None,
+                duration_ms: None,
+                input_tokens: None,
+                output_tokens: None,
+            });
+        }
+        let session_id = session.session_id.clone();
+        save_session(&workspace, &mut session).expect("salvar sessão");
+
+        let request = request_from_session(&workspace, &session_id).expect("promover");
+        assert!(request.contains("Construir um conversor CSV para JSON"));
+        assert!(request.contains("Preservar campos entre aspas"));
+        assert!(!request.contains("Use streaming"));
+
+        fs::remove_dir_all(workspace).expect("limpar workspace");
     }
 }

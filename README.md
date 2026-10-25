@@ -79,6 +79,14 @@ cargo run -p harness-cli -- chat --list
 
 Use `--workspace <dir>` to point at another project. `HARNESS_CHAT_PROVIDER=minimax` switches the chat to MiniMax 3; if it is omitted, `HARNESS_PROVIDER=minimax` also selects MiniMax. `HARNESS_CHAT_MODEL` overrides the model for either provider; otherwise use `HARNESS_CLAUDE_MODEL` or `HARNESS_MINIMAX_MODEL`. `HARNESS_CLAUDE_BIN` overrides the Claude executable. To implement something discussed in the chat, start a `run --request`; the chat itself is intentionally read-only.
 
+To promote a saved conversation into the normal implementation flow, run this from the same project directory:
+
+```sh
+cargo run -p harness-cli -- run --from-session <session_id>
+```
+
+This transfers only the user's decisions into a new request. The analyst still asks blocking questions, the contract and sensors still require approval, and no project file is changed before the regular merge gate.
+
 `harness run --job-02` is the adversarial benchmark: a shortcut passes the visible step but fails the hidden sensors in the integration step. The roadmap for all rounds is in `docs/roadmap.md`.
 
 Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. With Codex, each falls back to `HARNESS_CODEX_MODEL` or the CLI default; with Claude, to `HARNESS_CLAUDE_MODEL`; with MiniMax, to `HARNESS_MINIMAX_MODEL` or `MiniMax-M3`. Set `HARNESS_CLAUDE_BIN` to override the Claude executable.

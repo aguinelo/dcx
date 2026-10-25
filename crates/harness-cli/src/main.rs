@@ -130,8 +130,38 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            Some("--from-session") => {
+                let session_id = args.next().unwrap_or_default();
+                if session_id.trim().is_empty() || args.next().is_some() {
+                    eprintln!("Uso: harness run --from-session <session_id>");
+                    std::process::exit(2);
+                }
+                let workspace = match std::env::current_dir() {
+                    Ok(workspace) => workspace,
+                    Err(error) => {
+                        eprintln!("Falha ao obter o projeto atual: {error}");
+                        std::process::exit(1);
+                    }
+                };
+                let request = match chat::request_from_session(&workspace, &session_id) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        eprintln!("Falha ao promover a sessão: {error}");
+                        std::process::exit(1);
+                    }
+                };
+                println!(
+                    "Sessão promovida para um novo run; a aprovação do contrato continua obrigatória."
+                );
+                if let Err(error) = interactive::run(&request) {
+                    eprintln!("Falha na preparação da tarefa: {error}");
+                    std::process::exit(1);
+                }
+            }
             _ => {
-                eprintln!("Uso: harness run < --demo | --pilot | --request <pedido> >");
+                eprintln!(
+                    "Uso: harness run < --demo | --pilot | --request <pedido> | --from-session <session_id> >"
+                );
                 std::process::exit(2);
             }
         },
