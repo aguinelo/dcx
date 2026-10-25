@@ -39,6 +39,12 @@ struct RunInputRequest {
     input: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct CancelRunRequest {
+    workspace: String,
+    run_id: String,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
@@ -112,6 +118,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/runs/from-session/approve") => handle_approve_promotion(&mut stream, body),
         ("POST", "/runs/from-session/start") => handle_start_run(&mut stream, body),
         ("POST", "/runs/input") => handle_run_input(&mut stream, body),
+        ("POST", "/runs/cancel") => handle_run_cancel(&mut stream, body),
         ("GET", "/runs/from-session/status") => handle_promotion_status(&mut stream, query),
         ("GET", "/runs/status") => handle_run_status(&mut stream, query),
         ("GET", "/runs/events") => handle_run_events(&mut stream, query),
@@ -224,12 +231,25 @@ fn handle_run_input(stream: &mut TcpStream, body: &str) -> Result<(), String> {
     )
 }
 
+fn handle_run_cancel(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: CancelRunRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let workspace = PathBuf::from(request.workspace);
+    crate::worker::cancel(&workspace, &request.run_id)?;
+    respond_json(
+        stream,
+        202,
+        &serde_json::json!({"status": "cancelled", "run_id": request.run_id}).to_string(),
+    )
+}
+
 fn handle_run_status(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     let workspace = query_value(query, "workspace")
         .ok_or("GET /runs/status exige ?workspace=<diretório>".to_owned())?;
     let run_id =
         query_value(query, "run_id").ok_or("GET /runs/status exige &run_id=<id>".to_owned())?;
     let workspace = PathBuf::from(percent_decode(&workspace)?);
+    crate::worker::recover(&workspace);
     let run_id = percent_decode(&run_id)?;
     let job = crate::jobs::load(&workspace, &run_id)?;
     respond_json(

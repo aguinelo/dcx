@@ -13,10 +13,23 @@ struct InputHandle {
 }
 
 type InputMap = HashMap<String, Arc<Mutex<InputHandle>>>;
+type ProcessMap = HashMap<String, Arc<Mutex<std::process::Child>>>;
 
 fn inputs() -> &'static Mutex<InputMap> {
     static INPUTS: OnceLock<Mutex<InputMap>> = OnceLock::new();
     INPUTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn processes() -> &'static Mutex<ProcessMap> {
+    static PROCESSES: OnceLock<Mutex<ProcessMap>> = OnceLock::new();
+    PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn is_running(run_id: &str) -> bool {
+    processes()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(false)
 }
 
 pub fn start(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), String> {
@@ -51,6 +64,9 @@ fn execute(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Strin
         .spawn()
         .map_err(|error| format!("não foi possível iniciar worker: {error}"))?;
     let stdin = child.stdin.take().ok_or("worker sem stdin")?;
+    let stdout = child.stdout.take().ok_or("worker sem stdout")?;
+    let stderr = child.stderr.take().ok_or("worker sem stderr")?;
+    let child = Arc::new(Mutex::new(child));
     inputs()
         .lock()
         .map_err(|_| "lock de inputs indisponível".to_owned())?
@@ -61,8 +77,10 @@ fn execute(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Strin
                 workspace: workspace.to_path_buf(),
             })),
         );
-    let stdout = child.stdout.take().ok_or("worker sem stdout")?;
-    let stderr = child.stderr.take().ok_or("worker sem stderr")?;
+    processes()
+        .lock()
+        .map_err(|_| "lock de processos indisponível".to_owned())?
+        .insert(run_id.to_owned(), child.clone());
     let workspace_for_stdout = workspace.to_path_buf();
     let run_for_stdout = run_id.to_owned();
     let stdout_thread = thread::spawn(move || {
@@ -99,11 +117,21 @@ fn execute(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Strin
             );
         }
     });
-    let status = child.wait().map_err(|error| error.to_string())?;
+    let status = child
+        .lock()
+        .map_err(|_| "processo do worker indisponível".to_owned())?
+        .wait()
+        .map_err(|error| error.to_string())?;
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
     inputs().lock().ok().map(|mut map| map.remove(run_id));
-    if status.success() {
+    processes().lock().ok().map(|mut map| map.remove(run_id));
+    let cancelled = jobs::load(workspace, run_id)
+        .map(|job| job.status == "cancelled")
+        .unwrap_or(false);
+    if cancelled {
+        jobs::append_event(workspace, run_id, "cancelled", serde_json::json!({}))?;
+    } else if status.success() {
         jobs::set_status(workspace, run_id, "done")?;
         jobs::append_event(workspace, run_id, "done", serde_json::json!({}))?;
     } else {
@@ -116,6 +144,53 @@ fn execute(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Strin
         )?;
     }
     Ok(())
+}
+
+pub fn cancel(workspace: &Path, run_id: &str) -> Result<(), String> {
+    let process = processes()
+        .lock()
+        .map_err(|_| "lock de processos indisponível".to_owned())?
+        .get(run_id)
+        .cloned()
+        .ok_or_else(|| format!("run {run_id} não está em execução"))?;
+    process
+        .lock()
+        .map_err(|_| "processo do worker indisponível".to_owned())?
+        .kill()
+        .map_err(|error| format!("não foi possível cancelar run: {error}"))?;
+    jobs::set_status(workspace, run_id, "cancelled")?;
+    jobs::append_event(workspace, run_id, "cancel_requested", serde_json::json!({}))
+}
+
+pub fn recover(workspace: &Path) {
+    let root = workspace.join(".harness").join("api-runs");
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(job) =
+            serde_json::from_slice::<jobs::RunJob>(&std::fs::read(&path).unwrap_or_default())
+        else {
+            continue;
+        };
+        if job.status == "queued" {
+            let _ = start(workspace, &job.run_id, &job.session_id);
+        } else if (job.status == "running" || job.status == "awaiting_input")
+            && !is_running(&job.run_id)
+        {
+            let _ = jobs::set_status(workspace, &job.run_id, "failed");
+            let _ = jobs::append_event(
+                workspace,
+                &job.run_id,
+                "recovered_as_failed",
+                serde_json::json!({"reason": "daemon reiniciado durante a execução"}),
+            );
+        }
+    }
 }
 
 pub fn send_input(run_id: &str, input: &str) -> Result<(), String> {
