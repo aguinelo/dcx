@@ -9,8 +9,8 @@ use crate::events::EventLog;
 use crate::lock::ProjectLock;
 use crate::providers::{self, Analyst};
 use harness_artifacts::{
-    Answer, ContractBundle, DeliveryReport, Plan, SCHEMA_VERSION, SensorImplementation, SensorLock,
-    SensorVisibility, Understanding,
+    Answer, ContractBundle, DeliveryReport, DisputeDecision, Plan, SCHEMA_VERSION, SensorDispute,
+    SensorImplementation, SensorLock, SensorVisibility, Understanding, resolve_sensor_dispute,
 };
 use harness_engine::{
     RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
@@ -185,9 +185,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
 }
 
 pub fn resume(run_id: &str) -> InteractiveResult<()> {
-    if run_id.trim().is_empty() {
-        return Err("Informe o id do run para retomar.".into());
-    }
+    validate_run_id(run_id)?;
     let workspace = std::env::current_dir()?;
     let _lock = ProjectLock::acquire(&workspace)?;
     let artifact_dir = workspace.join(".harness").join("runs").join(run_id);
@@ -278,6 +276,216 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
         )?;
         Err("A execução retomada não foi aprovada; veja o relatório.".into())
     }
+}
+
+pub fn dispute(run_id: &str, sensor_id: &str, reason: &str) -> InteractiveResult<()> {
+    validate_run_id(run_id)?;
+    if sensor_id.trim().is_empty() || reason.trim().is_empty() {
+        return Err("Informe run, sensor e motivo da disputa.".into());
+    }
+    let workspace = std::env::current_dir()?;
+    let _lock = ProjectLock::acquire(&workspace)?;
+    let artifact_dir = workspace.join(".harness").join("runs").join(run_id);
+    if !artifact_dir.is_dir() {
+        return Err(format!(
+            "Run {} não encontrado em {}.",
+            run_id,
+            artifact_dir.display()
+        )
+        .into());
+    }
+    let mut bundle: ContractBundle = read_json(&artifact_dir.join("contract_bundle.json"))?;
+    let mut implementation: SensorImplementation =
+        read_json(&artifact_dir.join("sensor_implementation.json"))?;
+    let understanding: Understanding = read_json(&artifact_dir.join("understanding.json"))?;
+    let lock: SensorLock = read_json(&artifact_dir.join("sensor_lock.json"))?;
+    lock.verify(&bundle.sensor_suite)?;
+    let sensor = bundle
+        .sensor_suite
+        .sensors
+        .iter()
+        .find(|sensor| sensor.id == sensor_id)
+        .cloned()
+        .ok_or_else(|| format!("Sensor {} não pertence ao run {}.", sensor_id, run_id))?;
+
+    println!("Disputa do sensor {}: {}", sensor.id, reason.trim());
+    println!("Check atual: {}", sensor.check);
+    let answer = read_line("Aceitar a disputa e reescrever apenas este sensor? [s/N]: ")?;
+    let accepted = matches!(
+        answer.trim().to_lowercase().as_str(),
+        "s" | "sim" | "y" | "yes"
+    );
+    let decision = DisputeDecision {
+        accepted,
+        replacement: accepted.then(|| sensor.clone()),
+        note: reason.trim().to_owned(),
+    };
+    let dispute = SensorDispute {
+        sensor_id: sensor.id.clone(),
+        reason: reason.trim().to_owned(),
+        requested_by: "executor".to_owned(),
+    };
+    let updated_suite = resolve_sensor_dispute(&bundle.sensor_suite, &dispute, &decision)?;
+    let mut events = EventLog::open(&artifact_dir, run_id)?;
+    fs::write(
+        artifact_dir.join("sensor_dispute.json"),
+        serde_json::to_vec_pretty(&dispute)?,
+    )?;
+    if !accepted {
+        fs::write(
+            artifact_dir.join("dispute_decision.json"),
+            serde_json::to_vec_pretty(&decision)?,
+        )?;
+        events.append(
+            "sensor.dispute_rejected",
+            serde_json::json!({"sensor_id": sensor.id, "reason": reason.trim()}),
+        )?;
+        println!("Disputa rejeitada; a suíte e a implementação não foram alteradas.");
+        return Ok(());
+    }
+
+    let script = reauthor_disputed_sensor(
+        &workspace,
+        &bundle,
+        &implementation,
+        &sensor,
+        &understanding.locale,
+        reason,
+        run_id,
+    )?;
+    let index = implementation
+        .scripts
+        .iter()
+        .position(|candidate| candidate.sensor_id == sensor.id)
+        .ok_or_else(|| format!("Sensor {} não tem script implementado.", sensor.id))?;
+    implementation.scripts[index] = script;
+    implementation.validate_for(&updated_suite)?;
+    bundle.sensor_suite = updated_suite;
+    let sensor_dir = sensor_directory(run_id);
+    let _ = fs::remove_dir_all(&sensor_dir);
+    ScriptSensorRunner::materialize(&implementation, &bundle.sensor_suite, &sensor_dir)?;
+    fs::write(
+        artifact_dir.join("contract_bundle.json"),
+        serde_json::to_vec_pretty(&bundle)?,
+    )?;
+    fs::write(
+        artifact_dir.join("sensor_suite.json"),
+        serde_json::to_vec_pretty(&bundle.sensor_suite)?,
+    )?;
+    save_sensor_manifest(&artifact_dir, run_id, &bundle, &implementation, &sensor_dir)?;
+    fs::write(
+        artifact_dir.join("dispute_decision.json"),
+        serde_json::to_vec_pretty(&decision)?,
+    )?;
+    events.append(
+        "sensor.dispute_accepted",
+        serde_json::json!({
+            "sensor_id": sensor.id,
+            "reason": reason.trim(),
+            "implementation_checksum": implementation.checksum()?,
+        }),
+    )?;
+    println!(
+        "Sensor {} reescrito. Rode `harness resume --run {}` para reexecutar o plano.",
+        sensor.id, run_id
+    );
+    Ok(())
+}
+
+fn reauthor_disputed_sensor(
+    workspace: &Path,
+    bundle: &ContractBundle,
+    implementation: &SensorImplementation,
+    sensor: &harness_artifacts::SensorSpec,
+    locale: &str,
+    reason: &str,
+    run_id: &str,
+) -> InteractiveResult<harness_artifacts::SensorScript> {
+    let suite = harness_artifacts::SensorSuite {
+        schema_version: SCHEMA_VERSION,
+        sensors: vec![sensor.clone()],
+    };
+    let scoped_bundle = ContractBundle {
+        schema_version: SCHEMA_VERSION,
+        contract: bundle
+            .contract
+            .for_criteria(std::slice::from_ref(&sensor.criterion_id)),
+        sensor_suite: suite.clone(),
+    };
+    let mut previous = implementation
+        .scripts
+        .iter()
+        .find(|script| script.sensor_id == sensor.id)
+        .map(|script| SensorImplementation {
+            schema_version: SCHEMA_VERSION,
+            scripts: vec![script.clone()],
+        });
+    let mut feedback = Some(format!(
+        "Reescreva somente o sensor {}. Motivo da disputa: {}",
+        sensor.id,
+        reason.trim()
+    ));
+    let mut author = providers::acceptance_author()?;
+    let root = state_root().join("disputes").join(run_id);
+    let baseline = root.join("baseline");
+    let materialized = root.join("sensors");
+    let result = (|| {
+        for attempt in 1..=3 {
+            let candidate = author
+                .implement(
+                    workspace,
+                    &scoped_bundle,
+                    locale,
+                    previous.as_ref(),
+                    feedback.as_deref(),
+                )
+                .map_err(|error| format!("Acceptance author não conseguiu reescrever: {error}"))?;
+            if let Err(error) = candidate.validate_for(&suite) {
+                feedback = Some(format!("Implementação inválida: {error}"));
+                previous = Some(candidate);
+                continue;
+            }
+            let _ = fs::remove_dir_all(&baseline);
+            fs::create_dir_all(&baseline)?;
+            let _ = fs::remove_dir_all(&materialized);
+            let mut runner = ScriptSensorRunner::materialize(&candidate, &suite, &materialized)
+                .map_err(|error| format!("Não foi possível materializar o sensor: {error}"))?;
+            match check_sensors_fail(&suite, &mut runner, &baseline) {
+                Ok(results) => {
+                    println!(
+                        "Tentativa {attempt}: {} sensor(es) falharam no baseline.",
+                        results.len()
+                    );
+                    return candidate
+                        .scripts
+                        .into_iter()
+                        .find(|script| script.sensor_id == sensor.id)
+                        .ok_or_else(|| {
+                            format!("Author não devolveu script para {}.", sensor.id).into()
+                        });
+                }
+                Err(error) => {
+                    feedback = Some(error);
+                    previous = Some(candidate);
+                }
+            }
+        }
+        Err("Acceptance author não produziu um sensor válido após 3 tentativas.".into())
+    })();
+    let _ = fs::remove_dir_all(root);
+    result
+}
+
+fn validate_run_id(run_id: &str) -> InteractiveResult<()> {
+    if run_id.trim().is_empty()
+        || run_id.contains('/')
+        || run_id.contains('\\')
+        || run_id == "."
+        || run_id.contains("..")
+    {
+        return Err("Id de run inválido.".into());
+    }
+    Ok(())
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> InteractiveResult<T> {

@@ -8,7 +8,7 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R1 | Entendimento e contrato | concluída |
 | R2 | Sensores executáveis, lock e baseline | concluída |
 | R3 | Plano, cópia isolada, verifier e merge gate | concluída |
-| R4 | Prova adversarial `job-02`, disputa de sensor, issues saneadas | concluída; disputa interativa pendente |
+| R4 | Prova adversarial `job-02`, disputa de sensor, issues saneadas | concluída |
 | R5 | Apply atômico, ledger de eventos e limpeza do estado | concluída |
 | R6 | Isolamento de ambiente e sandbox opt-in dos sensores | concluída no macOS e Linux; validação runtime Linux pendente |
 | R7 | Provider `auto`, CI e documentação operacional | concluída; custo por run pendente |

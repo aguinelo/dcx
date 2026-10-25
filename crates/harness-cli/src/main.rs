@@ -77,6 +77,43 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Some("dispute") => {
+            let mut run_id = None;
+            let mut sensor_id = None;
+            let mut reason = None;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--run" => run_id = args.next(),
+                    "--sensor" => sensor_id = args.next(),
+                    "--reason" => {
+                        reason = Some(args.collect::<Vec<_>>().join(" "));
+                        break;
+                    }
+                    _ => {
+                        eprintln!(
+                            "Uso: harness dispute --run <run_id> --sensor <sensor_id> --reason <motivo>"
+                        );
+                        std::process::exit(2);
+                    }
+                }
+            }
+            let (Some(run_id), Some(sensor_id), Some(reason)) = (run_id, sensor_id, reason) else {
+                eprintln!(
+                    "Uso: harness dispute --run <run_id> --sensor <sensor_id> --reason <motivo>"
+                );
+                std::process::exit(2);
+            };
+            if run_id.trim().is_empty() || sensor_id.trim().is_empty() || reason.trim().is_empty() {
+                eprintln!(
+                    "Uso: harness dispute --run <run_id> --sensor <sensor_id> --reason <motivo>"
+                );
+                std::process::exit(2);
+            }
+            if let Err(error) = interactive::dispute(&run_id, &sensor_id, &reason) {
+                eprintln!("Falha ao resolver a disputa: {error}");
+                std::process::exit(1);
+            }
+        }
         Some("state") => match args.next().as_deref() {
             Some("prune") => {
                 if let Err(error) = state::run_prune(args) {
@@ -94,7 +131,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|resume --run <run_id>|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
+                "Uso: harness <states|schemas --write|--check [DIR]|resume --run <run_id>|dispute --run <run_id> --sensor <sensor_id> --reason <motivo>|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
             );
             std::process::exit(2);
         }

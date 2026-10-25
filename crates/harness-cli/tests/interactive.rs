@@ -231,6 +231,88 @@ fn single_run_dir(project: &Path) -> PathBuf {
     runs[0].path()
 }
 
+fn run_dispute(
+    project: &Path,
+    state: &Path,
+    codex: &Path,
+    run_id: &str,
+    input: &str,
+) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args([
+            "dispute",
+            "--run",
+            run_id,
+            "--sensor",
+            "visible-organize-by-type",
+            "--reason",
+            "O sensor visível não cobre o caso de arquivos duplicados.",
+        ])
+        .current_dir(project)
+        .env("HARNESS_CODEX_BIN", codex)
+        .env("HARNESS_STATE_DIR", state)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("harness dispute deve iniciar");
+    child
+        .stdin
+        .take()
+        .expect("stdin disponível")
+        .write_all(input.as_bytes())
+        .expect("enviar decisão");
+    child.wait_with_output().expect("aguardar dispute")
+}
+
+#[test]
+fn accepted_dispute_reauthorizes_only_the_contested_sensor() {
+    let project = unique_dir("dispute");
+    let state_dir = unique_dir("dispute-state");
+    let codex = write_fake_codex(&project, &[CONTRACT]);
+
+    let output = run_request(&project, &state_dir, &codex, "tipo\ns\n");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let run = single_run_dir(&project);
+    let run_id = run
+        .file_name()
+        .expect("run id")
+        .to_string_lossy()
+        .to_string();
+    let before: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("sensor_implementation.json")).expect("impl"))
+            .expect("impl JSON");
+
+    let output = run_dispute(&project, &state_dir, &codex, &run_id, "s\n");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Sensor visible-organize-by-type reescrito"));
+
+    let decision: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("dispute_decision.json")).expect("decisão"))
+            .expect("decisão JSON");
+    assert_eq!(decision["accepted"], true);
+    let after: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("sensor_implementation.json")).expect("impl"))
+            .expect("impl JSON");
+    assert_eq!(before["scripts"].as_array().expect("scripts").len(), 2);
+    assert_eq!(after["scripts"].as_array().expect("scripts").len(), 2);
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("sensor_manifest.json")).expect("manifesto"))
+            .expect("manifesto JSON");
+    assert_eq!(manifest["scripts"].as_array().expect("scripts").len(), 2);
+}
+
 #[test]
 fn blocking_question_is_answered_before_contract_approval() {
     let project = unique_dir("approve");
