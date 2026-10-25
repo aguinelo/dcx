@@ -38,6 +38,31 @@ The harness supports three providers behind the same role interfaces: `codex` (d
 
 MiniMax uses its Anthropic-compatible endpoint through the installed Claude CLI, so the same read-only and workspace-write permission modes apply. Configure `MINIMAX_API_KEY` and, optionally, `HARNESS_MINIMAX_MODEL` (default `MiniMax-M3`) and `HARNESS_MINIMAX_BASE_URL` (default `https://api.minimax.io/anthropic`; use `https://api.minimax.cn/anthropic` in China). The `.env.example` file documents every variable.
 
+### Modelos verificados localmente
+
+Para evitar tentativa e erro, a disponibilidade foi conferida contra as APIs configuradas neste projeto e pelo fluxo real de `harness chat`:
+
+| Provider | Modelos que responderam | Observação |
+| --- | --- | --- |
+| MiniMax | `MiniMax-M3.1-Flash`, `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.7-highspeed`, `MiniMax-M2.5`, `MiniMax-M2.5-highspeed` | API compatível e chat do Harness validados |
+| MiniMax | `MiniMax-M2.1`, `MiniMax-M2.1-highspeed`, `MiniMax-M2` | Retornaram HTTP 404 no endpoint Anthropic configurado |
+| Claude | `claude-sonnet-4-5-20250929` | Chat do Harness validado |
+| Codex/OpenAI | — | Ainda bloqueado pela quota/autenticação local deste ambiente |
+
+O catálogo pode variar por conta, região e endpoint; portanto, a tabela é um retrato da configuração local, não uma garantia de disponibilidade universal. Para escolher explicitamente um modelo:
+
+```sh
+# MiniMax (padrão atual do .env deste projeto)
+HARNESS_CHAT_PROVIDER=minimax
+HARNESS_CHAT_MODEL=MiniMax-M3.1-Flash
+
+# Claude
+HARNESS_CHAT_PROVIDER=claude
+HARNESS_CHAT_MODEL=claude-sonnet-4-5-20250929
+```
+
+Essas variáveis podem ficar no `.env`; não é necessário exportá-las manualmente no shell. `HARNESS_CHAT_MODEL` tem precedência para a conversa, seguido pelo modelo específico do provider (`HARNESS_MINIMAX_MODEL` ou `HARNESS_CLAUDE_MODEL`).
+
 The engine derives `step_report.files_changed` from workspace snapshots around each executor attempt, instead of trusting the executor's own list. Snapshots skip symlinks and enforce 16 MiB per file and 64 MiB per workspace limits.
 
 Acceptance sensors are frozen with a SHA-256 `SensorLock` before execution. The demo and pilot also run every sensor against an empty baseline and refuse a sensor that already passes, which catches checks written against the implementation instead of the contract.
