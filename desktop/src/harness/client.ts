@@ -12,6 +12,16 @@ export interface HarnessSession {
   updated_at_unix_ms: number;
 }
 
+export interface HarnessMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at_unix_ms: number;
+}
+
+export interface HarnessSessionDetail extends HarnessSession {
+  messages: HarnessMessage[];
+}
+
 export interface HarnessRun {
   schema_version: number;
   run_id: string;
@@ -59,6 +69,12 @@ export class HarnessClient {
       `/sessions?workspace=${encodeURIComponent(workspace)}`,
     );
     return response.sessions;
+  }
+
+  async session(workspace: string, sessionId: string): Promise<HarnessSessionDetail> {
+    return this.get(
+      `/session?workspace=${encodeURIComponent(workspace)}&session_id=${encodeURIComponent(sessionId)}`,
+    );
   }
 
   async promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }> {

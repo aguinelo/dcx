@@ -39,6 +39,7 @@ interface ReplBridge {
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
   workspace(): Promise<string>;
   sessions(workspace: string): Promise<Array<{ session_id: string; message_count: number; updated_at_unix_ms: number }>>;
+  session(workspace: string, sessionId: string): Promise<{ messages: Array<{ role: 'user' | 'assistant'; content: string }> }>;
   projects(root: string): Promise<Array<{ path: string }>>;
 }
 
@@ -61,7 +62,7 @@ let busy = false;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
-function conversationNode(item: { title: string; active?: boolean }): HTMLElement {
+function conversationNode(item: { title: string; active?: boolean; sessionId?: string }): HTMLElement {
   const node = document.createElement('li');
   if (item.active) node.classList.add('is-active');
 
@@ -74,12 +75,29 @@ function conversationNode(item: { title: string; active?: boolean }): HTMLElemen
   title.textContent = item.title;
 
   node.append(glyph, title);
+  if (item.sessionId) node.dataset.sessionId = item.sessionId;
 
   return node;
 }
 
-function renderAllConversations(items: Array<{ title: string; active?: boolean }>): void {
+function renderAllConversations(items: Array<{ title: string; active?: boolean; sessionId?: string }>): void {
   el<HTMLUListElement>('all-conversations').replaceChildren(...items.map(conversationNode));
+}
+
+async function loadSession(workspace: string, sessionId: string): Promise<void> {
+  try {
+    const session = await bridge.session(workspace, sessionId);
+    thread.replaceChildren();
+    for (const message of session.messages) {
+      if (message.role === 'user') addUserMessage(message.content);
+      else addAssistantMessage(message.content);
+    }
+    document.querySelectorAll('[data-session-id]').forEach((node) => {
+      node.classList.toggle('is-active', (node as HTMLElement).dataset.sessionId === sessionId);
+    });
+  } catch (error) {
+    showNotice('Falha ao carregar sessão', error instanceof Error ? error.message : String(error), true);
+  }
 }
 
 function projectSection(group: { name: string; items: Array<{ title: string; active?: boolean }> }): HTMLElement {
@@ -918,6 +936,12 @@ function handleChromeAction(action: string): void {
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
 
+  const sessionNode = target.closest<HTMLElement>('[data-session-id]');
+  if (sessionNode?.dataset.sessionId) {
+    void bridge.workspace().then((workspace) => loadSession(workspace, sessionNode.dataset.sessionId!));
+    return;
+  }
+
   const option = target.closest<HTMLElement>('[data-option]');
   if (option) {
     selectOption(option);
@@ -954,8 +978,10 @@ async function loadHarnessData(): Promise<void> {
       sessions.map((session, index) => ({
         title: `${session.session_id} · ${session.message_count} mensagens`,
         active: index === 0,
+        sessionId: session.session_id,
       })),
     );
+    if (sessions[0]) await loadSession(workspace, sessions[0].session_id);
     const projects = await bridge.projects(workspace);
     el('groups').replaceChildren(
       projectSection({

@@ -113,6 +113,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
     match (method, route) {
         ("GET", "/health") => respond_json(&mut stream, 200, r#"{"status":"ok"}"#),
         ("GET", "/sessions") => handle_sessions(&mut stream, query),
+        ("GET", "/session") => handle_session(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
         ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
         ("POST", "/runs/from-session/approve") => handle_approve_promotion(&mut stream, body),
@@ -136,6 +137,21 @@ fn handle_sessions(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     let body = serde_json::to_string(&serde_json::json!({"sessions": sessions}))
         .map_err(|error| format!("não foi possível serializar sessões: {error}"))?;
     respond_json(stream, 200, &body)
+}
+
+fn handle_session(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /session exige ?workspace=<diretório>".to_owned())?;
+    let session_id =
+        query_value(query, "session_id").ok_or("GET /session exige &session_id=<id>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let session_id = percent_decode(&session_id)?;
+    let session = chat::session(&workspace, &session_id)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::to_string(&session).map_err(|error| error.to_string())?,
+    )
 }
 
 fn handle_promote(stream: &mut TcpStream, body: &str) -> Result<(), String> {

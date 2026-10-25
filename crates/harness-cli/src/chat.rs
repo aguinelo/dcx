@@ -510,6 +510,10 @@ pub fn open_session(workspace: &Path, session_id: Option<&str>) -> Result<ChatSe
     }
 }
 
+pub fn session(workspace: &Path, session_id: &str) -> Result<ChatSession, String> {
+    load_session(workspace, session_id)
+}
+
 /// Converts an exploratory session into the request consumed by the normal
 /// contract/sensor/run flow. This does not execute anything or modify files.
 pub fn request_from_session(workspace: &Path, session_id: &str) -> Result<String, String> {
