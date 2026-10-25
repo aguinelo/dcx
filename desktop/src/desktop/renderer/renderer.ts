@@ -6,7 +6,6 @@
  */
 
 import {
-  CONTEXT_USED,
   TERMINAL_SESSIONS,
   type BackgroundTask,
   type TranscriptItem,
@@ -740,7 +739,7 @@ async function updateContext(used: number): Promise<void> {
 
 /* ── Events ──────────────────────────────────────────────────── */
 
-let accumulatedTokens = CONTEXT_USED;
+let accumulatedTokens = 0;
 
 bridge.onEvent((payload) => {
   switch (payload.type) {
@@ -973,6 +972,6 @@ async function loadHarnessData(): Promise<void> {
 }
 
 void loadHarnessData();
-void updateContext(CONTEXT_USED);
+void updateContext(0);
 setPlaceholder();
 input.focus();
