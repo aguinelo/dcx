@@ -40,7 +40,7 @@ The engine derives `step_report.files_changed` from workspace snapshots around e
 
 Acceptance sensors are frozen with a SHA-256 `SensorLock` before execution. The demo and pilot also run every sensor against an empty baseline and refuse a sensor that already passes, which catches checks written against the implementation instead of the contract.
 
-The demo and pilot execute acceptance sensors as Python scripts through `harness-sensors`. Scripts are materialized outside the task workspace, made read-only, checked against their locked source before every run, and time out after 60 seconds. They receive `HARNESS_WORKSPACE`, `HARNESS_SENSOR_ID` and `HARNESS_CRITERION_ID`; exit code 0 means pass. The runner clears the inherited environment and passes only a minimal allowlist. Set `HARNESS_SENSOR_SANDBOX=auto` or `required` to use `sandbox-exec` on macOS, which denies network and writes outside the workspace; Linux sandboxing is not implemented yet.
+The demo and pilot execute acceptance sensors as Python scripts through `harness-sensors`. Scripts are materialized outside the task workspace, made read-only, checked against their locked source before every run, and time out after 60 seconds. They receive `HARNESS_WORKSPACE`, `HARNESS_SENSOR_ID` and `HARNESS_CRITERION_ID`; exit code 0 means pass. The runner clears the inherited environment and passes only a minimal allowlist. Set `HARNESS_SENSOR_SANDBOX=auto` or `required` to use `sandbox-exec` on macOS or bubblewrap (`bwrap`) on Linux, denying network and writes outside the workspace. `auto` falls back to an unsandboxed run when the helper is unavailable; `required` fails instead.
 
 Start an interactive understanding and contract approval flow for the current project:
 

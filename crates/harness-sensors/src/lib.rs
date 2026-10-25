@@ -163,6 +163,11 @@ impl SensorRunner for ScriptSensorRunner {
 
         let mut command = sensor_command(&self.python, &script, workspace, self.sandbox)
             .map_err(|error| format!("cannot prepare sensor {}: {error}", sensor.id))?;
+        let tmpdir = if self.sandbox == SandboxMode::Off {
+            std::env::var_os("TMPDIR").unwrap_or_default()
+        } else {
+            "/tmp".into()
+        };
         let mut child = command
             .current_dir(workspace)
             .env_clear()
@@ -170,7 +175,7 @@ impl SensorRunner for ScriptSensorRunner {
             .env("HARNESS_SENSOR_ID", &sensor.id)
             .env("HARNESS_CRITERION_ID", &sensor.criterion_id)
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("TMPDIR", std::env::var_os("TMPDIR").unwrap_or_default())
+            .env("TMPDIR", tmpdir)
             .env(
                 "LANG",
                 std::env::var_os("LANG").unwrap_or_else(|| "C.UTF-8".into()),
@@ -180,6 +185,7 @@ impl SensorRunner for ScriptSensorRunner {
                 std::env::var_os("LC_ALL").unwrap_or_else(|| "C.UTF-8".into()),
             )
             .env("PYTHONIOENCODING", "utf-8")
+            .env("PYTHONDONTWRITEBYTECODE", "1")
             .env("HOME", &self.outputs)
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
@@ -281,7 +287,24 @@ fn sensor_command(
             return Err("sandbox-exec não está disponível".to_owned());
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        if linux_sandbox_available() {
+            let workspace = fs::canonicalize(workspace)
+                .map_err(|error| format!("cannot resolve sensor workspace: {error}"))?;
+            let script = fs::canonicalize(script)
+                .map_err(|error| format!("cannot resolve sensor script: {error}"))?;
+            let mut command = Command::new("bwrap");
+            command.args(bwrap_args(&workspace, python, &script));
+            return Ok(command);
+        }
+        if sandbox == SandboxMode::Required {
+            return Err(
+                "bubblewrap (bwrap) não está disponível para o sandbox de sensores".to_owned(),
+            );
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     if sandbox == SandboxMode::Required {
         return Err("sandbox de sensores não implementado nesta plataforma".to_owned());
     }
@@ -289,6 +312,67 @@ fn sensor_command(
         let mut command = Command::new(python);
         command.arg(script);
         command
+    })
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn bwrap_args(workspace: &Path, python: &OsString, script: &Path) -> Vec<OsString> {
+    let workspace = workspace.to_string_lossy().into_owned();
+    let script = script.to_string_lossy().into_owned();
+    let script_dir = script
+        .rsplit_once('/')
+        .map(|(directory, _)| if directory.is_empty() { "/" } else { directory })
+        .unwrap_or("/");
+    vec![
+        "--die-with-parent".into(),
+        "--unshare-all".into(),
+        "--new-session".into(),
+        "--ro-bind".into(),
+        "/".into(),
+        "/".into(),
+        "--dev".into(),
+        "/dev".into(),
+        "--proc".into(),
+        "/proc".into(),
+        "--tmpfs".into(),
+        "/tmp".into(),
+        "--ro-bind".into(),
+        script_dir.into(),
+        script_dir.into(),
+        "--bind".into(),
+        workspace.clone().into(),
+        workspace.clone().into(),
+        "--chdir".into(),
+        workspace.into(),
+        "--".into(),
+        python.clone(),
+        script.into(),
+    ]
+}
+
+#[cfg(target_os = "linux")]
+fn linux_sandbox_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        Command::new("bwrap")
+            .args([
+                "--unshare-all",
+                "--ro-bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                "--",
+                "true",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
     })
 }
 
@@ -436,8 +520,8 @@ mod tests {
     #[test]
     fn slow_script_times_out() {
         let result = run(
-            "import time\ntime.sleep(5)\nprint('too late')",
-            Duration::from_millis(100),
+            "import time\ntime.sleep(10)\nprint('too late')",
+            Duration::from_millis(250),
         );
         assert!(!result.passed);
         assert!(result.evidence.contains("timed out"));
@@ -450,6 +534,58 @@ mod tests {
         assert!(profile.contains("(deny network*)"));
         assert!(profile.contains("(deny file-write*)"));
         assert!(profile.contains("(allow file-write*"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bubblewrap_blocks_writes_outside_the_workspace() {
+        if !linux_sandbox_available() {
+            return;
+        }
+        let suite = suite();
+        let implementation = implementation(
+            "import sys\ntry:\n    open('/etc/harness-sandbox-escape', 'w').write('x')\nexcept OSError:\n    print('blocked')\nelse:\n    sys.exit(1)",
+        );
+        let directory = temp_dir("bwrap");
+        let mut runner = ScriptSensorRunner::materialize(&implementation, &suite, &directory)
+            .expect("materialize")
+            .with_sandbox(SandboxMode::Required);
+        let result = runner
+            .run_sensor(&suite.sensors[0], &directory)
+            .expect("run sensor");
+        assert!(result.passed, "{}", result.evidence);
+        fs::remove_dir_all(directory).expect("remove temp dir");
+    }
+
+    #[test]
+    fn bubblewrap_args_block_network_and_bind_the_workspace() {
+        let args = bwrap_args(
+            Path::new("/work/project"),
+            &OsString::from("/usr/bin/python3"),
+            Path::new("/state/probe.py"),
+        )
+        .into_iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+        assert!(args.iter().any(|arg| arg == "--unshare-all"));
+        assert!(args.iter().any(|arg| arg == "--die-with-parent"));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--bind" && pair[1] == "/work/project")
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--ro-bind" && pair[1] == "/")
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--tmpfs" && pair[1] == "/tmp")
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--ro-bind" && pair[1] == "/state")
+        );
+        assert!(args.iter().any(|arg| arg == "/state/probe.py"));
     }
 
     #[test]
