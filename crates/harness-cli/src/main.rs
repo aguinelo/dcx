@@ -4,6 +4,7 @@ mod demo;
 mod events;
 mod interactive;
 mod lock;
+mod metrics;
 mod providers;
 mod schemas;
 mod state;

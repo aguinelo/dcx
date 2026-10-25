@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::events::EventLog;
 use crate::lock::ProjectLock;
+use crate::metrics;
 use crate::providers::{self, Analyst};
 use harness_artifacts::{
     Answer, ContractBundle, DeliveryReport, DisputeDecision, Plan, SCHEMA_VERSION, SensorDispute,
@@ -26,6 +27,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     if request.trim().is_empty() {
         return Err("O pedido não pode estar vazio.".into());
     }
+    metrics::reset();
 
     let workspace = std::env::current_dir()?;
     let _lock = ProjectLock::acquire(&workspace)?;
@@ -149,6 +151,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         &execution,
         approved_bundle.contract.criteria.len(),
     )?;
+    metrics::write(&artifact_dir.join("metrics.json"))?;
     println!(
         "\nExecução concluída. Estado: {}",
         execution.states.last().unwrap()
@@ -186,6 +189,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
 
 pub fn resume(run_id: &str) -> InteractiveResult<()> {
     validate_run_id(run_id)?;
+    metrics::reset();
     let workspace = std::env::current_dir()?;
     let _lock = ProjectLock::acquire(&workspace)?;
     let artifact_dir = workspace.join(".harness").join("runs").join(run_id);
@@ -255,6 +259,7 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
         &execution,
         bundle.contract.criteria.len(),
     )?;
+    metrics::write(&artifact_dir.join("metrics.json"))?;
     println!(
         "Execução concluída. Estado: {}",
         execution.states.last().unwrap()
@@ -280,6 +285,7 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
 
 pub fn dispute(run_id: &str, sensor_id: &str, reason: &str) -> InteractiveResult<()> {
     validate_run_id(run_id)?;
+    metrics::reset();
     if sensor_id.trim().is_empty() || reason.trim().is_empty() {
         return Err("Informe run, sensor e motivo da disputa.".into());
     }
@@ -340,6 +346,7 @@ pub fn dispute(run_id: &str, sensor_id: &str, reason: &str) -> InteractiveResult
             "sensor.dispute_rejected",
             serde_json::json!({"sensor_id": sensor.id, "reason": reason.trim()}),
         )?;
+        metrics::write(&artifact_dir.join("metrics.json"))?;
         println!("Disputa rejeitada; a suíte e a implementação não foram alteradas.");
         return Ok(());
     }
@@ -385,6 +392,7 @@ pub fn dispute(run_id: &str, sensor_id: &str, reason: &str) -> InteractiveResult
             "implementation_checksum": implementation.checksum()?,
         }),
     )?;
+    metrics::write(&artifact_dir.join("metrics.json"))?;
     println!(
         "Sensor {} reescrito. Rode `harness resume --run {}` para reexecutar o plano.",
         sensor.id, run_id

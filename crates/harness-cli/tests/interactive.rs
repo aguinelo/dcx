@@ -379,6 +379,11 @@ fn blocking_question_is_answered_before_contract_approval() {
     assert_eq!(verdict["criteria"].as_array().expect("critérios").len(), 1);
     assert!(run.join("delivery_report.json").is_file());
     assert!(project.join("implemented.txt").is_file());
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("metrics.json")).expect("métricas"))
+            .expect("métricas JSON");
+    assert!(metrics["call_count"].as_u64().expect("call_count") >= 5);
+    assert_eq!(metrics["cost_complete"], false);
 }
 
 #[test]

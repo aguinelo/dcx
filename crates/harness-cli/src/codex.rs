@@ -4,13 +4,15 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use harness_artifacts::{
     Contract, ContractBundle, Plan, SensorImplementation, SensorResult, SensorSuite, StepReport,
     Understanding, Verdict, json_schemas,
 };
 use harness_engine::{ExecutionContext, Executor, Verifier};
+
+use crate::metrics::{self, CallMetric};
 use serde::de::DeserializeOwned;
 
 type CodexResult<T> = Result<T, Box<dyn Error>>;
@@ -332,6 +334,7 @@ fn invoke_codex<T: DeserializeOwned>(
         .1;
     let schema_file = ReadOnlySchema::create(schema_name, &schema).map_err(|e| e.to_string())?;
 
+    let started = Instant::now();
     let mut command = Command::new(binary);
     command
         .args(["exec", "--ephemeral", "--sandbox", sandbox, "--cd"])
@@ -375,12 +378,22 @@ fn invoke_codex<T: DeserializeOwned>(
             }
         ));
     }
-    serde_json::from_slice(&output.stdout).map_err(|error| {
+    let parsed = serde_json::from_slice(&output.stdout).map_err(|error| {
         format!(
             "Codex CLI retornou JSON inválido: {error}; stdout: {}",
             String::from_utf8_lossy(&output.stdout).trim()
         )
-    })
+    })?;
+    metrics::record(CallMetric {
+        role: metrics::role_for_schema(schema_name),
+        provider: "codex".to_owned(),
+        model: model.map(str::to_owned),
+        duration_ms: started.elapsed().as_millis(),
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    Ok(parsed)
 }
 
 struct ReadOnlySchema {

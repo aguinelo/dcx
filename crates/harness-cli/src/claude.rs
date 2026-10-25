@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use harness_artifacts::{
     Contract, ContractBundle, Plan, SensorImplementation, SensorResult, SensorSuite, StepReport,
@@ -13,6 +14,7 @@ use crate::codex::{
     acceptance_prompt, contract_prompt, executor_prompt, planner_prompt, understanding_prompt,
     verifier_prompt,
 };
+use crate::metrics::{self, CallMetric};
 use crate::providers::{AcceptanceAuthor, Analyst, Planner};
 
 enum Mode {
@@ -73,6 +75,7 @@ impl ClaudeCli {
         }
         command.arg(prompt);
 
+        let started = Instant::now();
         let output = command
             .output()
             .map_err(|error| format!("não foi possível iniciar Claude CLI: {error}"))?;
@@ -110,8 +113,18 @@ impl ClaudeCli {
                     envelope["result"].as_str().unwrap_or("vazio")
                 )
             })?;
-        serde_json::from_value(structured.clone())
-            .map_err(|error| format!("Claude CLI retornou structured_output inválido: {error}"))
+        let parsed = serde_json::from_value(structured.clone())
+            .map_err(|error| format!("Claude CLI retornou structured_output inválido: {error}"))?;
+        metrics::record(CallMetric {
+            role: metrics::role_for_schema(schema_name),
+            provider: "claude".to_owned(),
+            model: self.model.clone(),
+            duration_ms: started.elapsed().as_millis(),
+            cost_usd: envelope["total_cost_usd"].as_f64(),
+            input_tokens: envelope["usage"]["input_tokens"].as_u64(),
+            output_tokens: envelope["usage"]["output_tokens"].as_u64(),
+        });
+        Ok(parsed)
     }
 }
 
