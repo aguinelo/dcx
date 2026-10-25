@@ -109,6 +109,7 @@ pub struct ClaudeChatProvider {
     backend: Backend,
     model: Option<String>,
     web_enabled: bool,
+    max_tool_calls: usize,
 }
 
 impl ClaudeChatProvider {
@@ -144,6 +145,10 @@ impl ClaudeChatProvider {
                     )
                 })
                 .unwrap_or(false),
+            max_tool_calls: crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(8),
         })
     }
 
@@ -222,6 +227,7 @@ impl ChatProvider for ClaudeChatProvider {
         let mut input_tokens = None;
         let mut output_tokens = None;
         let mut parse_error = None;
+        let mut tool_calls = 0_usize;
 
         for line in BufReader::new(stdout).lines() {
             let line = match line {
@@ -262,6 +268,14 @@ impl ChatProvider for ClaudeChatProvider {
                                 block.get("id").and_then(Value::as_str),
                                 block.get("name").and_then(Value::as_str),
                             ) {
+                                tool_calls += 1;
+                                if tool_calls > self.max_tool_calls {
+                                    let _ = child.kill();
+                                    return Err(format!(
+                                        "limite de chamadas de ferramenta atingido ({})",
+                                        self.max_tool_calls
+                                    ));
+                                }
                                 on_event(ChatEvent::Progress(format!("Usando {name}…")));
                                 on_event(ChatEvent::ToolStart {
                                     id: id.to_owned(),
