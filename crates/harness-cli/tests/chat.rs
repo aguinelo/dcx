@@ -176,10 +176,8 @@ fn chat_streams_and_persists_a_read_only_session() {
         args.lines()
             .any(|line| line == "--allowedTools=Read,Glob,Grep")
     );
-    assert!(
-        args.lines()
-            .any(|line| line == "--disallowedTools=Bash,Edit,Write,NotebookEdit")
-    );
+    assert!(args.lines().any(|line| line
+        == "--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch"));
     assert!(!args.contains("acceptEdits"));
     assert!(args.contains("modo conversa read-only"));
 }

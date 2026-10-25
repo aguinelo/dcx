@@ -181,7 +181,7 @@ impl ChatProvider for ClaudeChatProvider {
             } else {
                 "--allowedTools=Read,Glob,Grep"
             })
-            .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit")
+            .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch")
             .arg("--append-system-prompt")
             .arg(system_prompt(workspace, self.web_enabled))
             .stdin(Stdio::null())
