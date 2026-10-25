@@ -585,6 +585,19 @@ pub fn promotion_status(workspace: &Path, session_id: &str) -> Result<PromotionS
     })
 }
 
+pub fn approved_request(workspace: &Path, session_id: &str) -> Result<String, String> {
+    let path = sessions_root(workspace)
+        .join(session_id)
+        .join("promotion_approval.json");
+    let bytes = fs::read(&path).map_err(|error| format!("sessão ainda não aprovada: {error}"))?;
+    let approval: PromotionApproval =
+        serde_json::from_slice(&bytes).map_err(|error| format!("aprovação inválida: {error}"))?;
+    if approval.session_id != session_id {
+        return Err("aprovação contém sessão divergente".to_owned());
+    }
+    Ok(approval.request)
+}
+
 pub fn send_message(
     workspace: &Path,
     session: &mut ChatSession,

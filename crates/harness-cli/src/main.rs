@@ -5,6 +5,7 @@ mod demo;
 mod env_file;
 mod events;
 mod interactive;
+mod jobs;
 mod lock;
 mod metrics;
 mod providers;
