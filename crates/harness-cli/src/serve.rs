@@ -98,6 +98,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/chat") => handle_chat(&mut stream, body),
         ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
         ("POST", "/runs/from-session/approve") => handle_approve_promotion(&mut stream, body),
+        ("GET", "/runs/from-session/status") => handle_promotion_status(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -153,6 +154,21 @@ fn handle_approve_promotion(stream: &mut TcpStream, body: &str) -> Result<(), St
             "next": format!("harness run --from-session {}", approval.session_id),
         })
         .to_string(),
+    )
+}
+
+fn handle_promotion_status(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /runs/from-session/status exige ?workspace=<diretório>".to_owned())?;
+    let session_id = query_value(query, "session_id")
+        .ok_or("GET /runs/from-session/status exige &session_id=<id>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let session_id = percent_decode(&session_id)?;
+    let status = chat::promotion_status(&workspace, &session_id)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::to_string(&status).map_err(|error| error.to_string())?,
     )
 }
 

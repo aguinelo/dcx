@@ -62,6 +62,13 @@ pub struct PromotionApproval {
     pub approved_at_unix_ms: u64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct PromotionStatus {
+    pub session_id: String,
+    pub status: String,
+    pub approved_at_unix_ms: Option<u64>,
+}
+
 #[derive(Debug)]
 pub struct ChatReply {
     pub text: String,
@@ -551,6 +558,33 @@ pub fn approve_session(workspace: &Path, session_id: &str) -> Result<PromotionAp
     Ok(approval)
 }
 
+pub fn promotion_status(workspace: &Path, session_id: &str) -> Result<PromotionStatus, String> {
+    validate_session_id(session_id)?;
+    let path = sessions_root(workspace)
+        .join(session_id)
+        .join("promotion_approval.json");
+    if !path.is_file() {
+        let _ = request_from_session(workspace, session_id)?;
+        return Ok(PromotionStatus {
+            session_id: session_id.to_owned(),
+            status: "ready_for_approval".to_owned(),
+            approved_at_unix_ms: None,
+        });
+    }
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("não foi possível ler aprovação {}: {error}", path.display()))?;
+    let approval: PromotionApproval = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("aprovação inválida {}: {error}", path.display()))?;
+    if approval.session_id != session_id {
+        return Err("aprovação contém sessão divergente".to_owned());
+    }
+    Ok(PromotionStatus {
+        session_id: session_id.to_owned(),
+        status: "approved".to_owned(),
+        approved_at_unix_ms: Some(approval.approved_at_unix_ms),
+    })
+}
+
 pub fn send_message(
     workspace: &Path,
     session: &mut ChatSession,
@@ -854,6 +888,12 @@ mod tests {
                 .join(&session_id)
                 .join("promotion_approval.json")
                 .is_file()
+        );
+        assert_eq!(
+            promotion_status(&workspace, &session_id)
+                .expect("status")
+                .status,
+            "approved"
         );
 
         fs::remove_dir_all(workspace).expect("limpar workspace");
