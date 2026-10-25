@@ -57,8 +57,16 @@
         </div>
 
         <footer class="sidebar__footer">
-          <button class="account"><span class="avatar" id="sidebar-avatar">?</span> <span id="sidebar-account-name">—</span> <span class="chev">▾</span></button>
+          <button class="account" data-action="account-menu"><span class="avatar" id="sidebar-avatar">?</span> <span id="sidebar-account-name">—</span> <span class="chev">▾</span></button>
           <button class="iconbtn" data-action="settings" title="Configurações">⚙</button>
+
+          <div class="account-menu" id="account-menu" hidden>
+            <div class="account-menu__email" id="account-menu-email">—</div>
+            <div class="account-menu__divider"></div>
+            <button class="account-menu__item" data-action="sign-out">
+              <span class="account-menu__icon">⎋</span> Sign out
+            </button>
+          </div>
         </footer>
       </aside>
 
@@ -192,6 +200,22 @@
         <section class="settings-section">
           <h3>Tema</h3>
           <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
+          <button class="btn btn--subtle" type="button" data-action="new-theme">+ Novo tema</button>
+
+          <form class="theme-form" id="theme-form" hidden>
+            <input type="text" id="theme-form-name" placeholder="Nome do tema" required />
+            <div class="theme-form__colors">
+              <label>Fundo <input type="color" id="theme-form-bg" value="#0b0b0b" /></label>
+              <label>Fundo elevado <input type="color" id="theme-form-bg-raised" value="#151515" /></label>
+              <label>Texto <input type="color" id="theme-form-text" value="#f0efec" /></label>
+              <label>Borda <input type="color" id="theme-form-border" value="#2a2a28" /></label>
+              <label>Acento <input type="color" id="theme-form-accent" value="#d97757" /></label>
+            </div>
+            <div class="theme-form__actions">
+              <button type="submit" class="btn btn--primary">Salvar tema</button>
+              <button type="button" class="btn" data-action="cancel-theme-form">Cancelar</button>
+            </div>
+          </form>
         </section>
 
         <button class="btn" data-action="close-settings">Fechar</button>

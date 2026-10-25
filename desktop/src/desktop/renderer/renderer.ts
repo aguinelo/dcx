@@ -52,6 +52,8 @@ interface ReplBridge {
     updates: Partial<{ provider: string; web_enabled: boolean; max_tool_calls: number }>,
   ): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   account(workspace: string): Promise<{ name: string; email?: string }>;
+  authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
+  authLogout(): Promise<{ loggedIn: boolean }>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;
@@ -251,6 +253,7 @@ function setTerminal(open: boolean): void {
  */
 const THEMES = [
   { id: 'dark', label: 'Escuro' },
+  { id: 'claude', label: 'Claude' },
   { id: 'light', label: 'Claro' },
   { id: 'oled', label: 'OLED' },
   { id: 'dusk', label: 'Anoitecer' },
@@ -258,13 +261,142 @@ const THEMES = [
 ] as const;
 
 const THEME_KEY = 'repl:theme';
+const CUSTOM_THEMES_KEY = 'repl:customThemes';
+
+/** The full token set every built-in [data-theme] block defines in app.css. */
+const CUSTOM_THEME_VARS = [
+  '--bg',
+  '--bg-raised',
+  '--bg-hover',
+  '--bg-hover-strong',
+  '--surface-subtle',
+  '--bubble-user',
+  '--border',
+  '--border-strong',
+  '--text',
+  '--muted',
+  '--faint',
+  '--accent',
+  '--accent-soft',
+  '--ok',
+  '--warn',
+  '--danger',
+  '--code-bg',
+  '--hint-bg',
+  '--tok-str',
+  '--toggle-knob',
+  '--scroll-thumb',
+  '--scroll-thumb-hover',
+] as const;
+
+interface CustomTheme {
+  id: string;
+  label: string;
+  bg: string;
+  bgRaised: string;
+  text: string;
+  border: string;
+  accent: string;
+}
+
+function hexToRgbTuple(hex: string): [number, number, number] {
+  const normalized = hex.replace('#', '');
+  const value = Number.parseInt(normalized.length === 3 ? normalized.replace(/(.)/g, '$1$1') : normalized, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function rgbTupleToHex([r, g, b]: [number, number, number]): string {
+  return `#${[r, g, b].map((channel) => Math.round(Math.min(255, Math.max(0, channel))).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Blends two hex colours; `t` of 0 is `hexA`, 1 is `hexB`. */
+function mixHex(hexA: string, hexB: string, t: number): string {
+  const a = hexToRgbTuple(hexA);
+  const b = hexToRgbTuple(hexB);
+  return rgbTupleToHex([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t] as [number, number, number]);
+}
+
+function relativeLuminance(hex: string): number {
+  const [r, g, b] = hexToRgbTuple(hex);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/**
+ * A custom theme only asks for 5 colours; every other token is derived from
+ * them with the same blend ratios the hand-picked built-in themes land on,
+ * so a custom theme reads as consistent rather than hand-tuned per field.
+ */
+function deriveCustomTokens(theme: CustomTheme): Record<(typeof CUSTOM_THEME_VARS)[number], string> {
+  const [tr, tg, tb] = hexToRgbTuple(theme.text);
+  const [br, bg, bb] = hexToRgbTuple(theme.bg);
+  const textRgb = `${tr} ${tg} ${tb}`;
+  const bgRgb = `${br} ${bg} ${bb}`;
+  return {
+    '--bg': theme.bg,
+    '--bg-raised': theme.bgRaised,
+    '--bg-hover': mixHex(theme.bg, theme.text, 0.08),
+    '--bg-hover-strong': mixHex(theme.bg, theme.text, 0.16),
+    '--surface-subtle': `rgb(${textRgb} / 3%)`,
+    '--bubble-user': mixHex(theme.bg, theme.text, 0.08),
+    '--border': theme.border,
+    '--border-strong': mixHex(theme.border, theme.text, 0.3),
+    '--text': theme.text,
+    '--muted': mixHex(theme.text, theme.bg, 0.4),
+    '--faint': mixHex(theme.text, theme.bg, 0.65),
+    '--accent': theme.accent,
+    '--accent-soft': mixHex(theme.accent, '#000000', 0.2),
+    '--ok': '#7f9b7a',
+    '--warn': '#c8963e',
+    '--danger': '#c9645a',
+    '--code-bg': `rgb(${textRgb} / 7%)`,
+    '--hint-bg': `rgb(${bgRgb} / 18%)`,
+    '--tok-str': '#8fbf7f',
+    '--toggle-knob': '#ffffff',
+    '--scroll-thumb': `rgb(${textRgb} / 14%)`,
+    '--scroll-thumb-hover': `rgb(${textRgb} / 24%)`,
+  };
+}
+
+function loadCustomThemes(): CustomTheme[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_THEMES_KEY);
+    return raw ? (JSON.parse(raw) as CustomTheme[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomThemes(themes: CustomTheme[]): void {
+  try {
+    localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(themes));
+  } catch {
+    // file:// can refuse storage; the themes still apply for this session.
+  }
+}
+
+let customThemes: CustomTheme[] = loadCustomThemes();
+let activeThemeId = 'dark';
 
 function applyTheme(id: string): void {
-  const known = THEMES.some((theme) => theme.id === id) ? id : 'dark';
-  document.documentElement.dataset.theme = known;
+  const custom = customThemes.find((theme) => theme.id === id);
+  const known = custom ? id : THEMES.some((theme) => theme.id === id) ? id : 'dark';
+  const root = document.documentElement;
+
+  if (custom) {
+    root.dataset.theme = '';
+    const tokens = deriveCustomTokens(custom);
+    for (const [name, value] of Object.entries(tokens)) root.style.setProperty(name, value);
+    root.style.colorScheme = relativeLuminance(custom.bg) > 0.5 ? 'light' : 'dark';
+  } else {
+    for (const name of CUSTOM_THEME_VARS) root.style.removeProperty(name);
+    root.style.removeProperty('color-scheme');
+    root.dataset.theme = known;
+  }
+
   for (const child of el('themes').children) {
     child.classList.toggle('is-active', (child as HTMLElement).dataset.theme === known);
   }
+  activeThemeId = known;
   try {
     localStorage.setItem(THEME_KEY, known);
   } catch {
@@ -273,17 +405,32 @@ function applyTheme(id: string): void {
 }
 
 function renderThemes(): void {
-  el('themes').replaceChildren(
-    ...THEMES.map(({ id, label }) => {
-      const swatch = document.createElement('button');
-      swatch.className = 'theme';
-      swatch.dataset.theme = id;
-      swatch.title = `Tema ${label}`;
-      swatch.setAttribute('role', 'radio');
-      swatch.setAttribute('aria-label', `Tema ${label}`);
-      return swatch;
-    }),
-  );
+  const builtIn = THEMES.map(({ id, label }) => {
+    const swatch = document.createElement('button');
+    swatch.className = 'theme';
+    swatch.dataset.theme = id;
+    swatch.title = `Tema ${label}`;
+    swatch.setAttribute('role', 'radio');
+    swatch.setAttribute('aria-label', `Tema ${label}`);
+    return swatch;
+  });
+  const custom = customThemes.map((theme) => {
+    const swatch = document.createElement('button');
+    swatch.className = 'theme theme--custom';
+    swatch.dataset.theme = theme.id;
+    swatch.title = `Tema ${theme.label}`;
+    swatch.style.background = `linear-gradient(135deg, ${theme.bg} 45%, ${theme.accent} 45%)`;
+    swatch.setAttribute('role', 'radio');
+    swatch.setAttribute('aria-label', `Tema ${theme.label}`);
+    const remove = document.createElement('span');
+    remove.className = 'theme__delete';
+    remove.dataset.deleteTheme = theme.id;
+    remove.title = `Excluir tema ${theme.label}`;
+    remove.textContent = '×';
+    swatch.append(remove);
+    return swatch;
+  });
+  el('themes').replaceChildren(...builtIn, ...custom);
 }
 
 /* ── Account and provider settings ─────────────────────────────── */
@@ -294,13 +441,52 @@ function initials(name: string): string {
   return trimmed.charAt(0).toUpperCase();
 }
 
+let currentAccountEmail = '';
+
 function renderAccount(account: { name: string; email?: string }): void {
   const mark = initials(account.name);
+  currentAccountEmail = account.email ?? '';
   el('sidebar-avatar').textContent = mark;
   el('sidebar-account-name').textContent = account.name;
   el('settings-avatar').textContent = mark;
   el('settings-account-name').textContent = account.name;
-  el('settings-account-email').textContent = account.email ?? '';
+  el('settings-account-email').textContent = currentAccountEmail;
+}
+
+/**
+ * Prefers the real, shared Claude Code login (same one `claude auth status`
+ * reports) over the workspace's git identity, since it is the account that
+ * actually authenticates chat turns. Falls back to git when logged out or
+ * when `claude` isn't the active provider's CLI.
+ */
+async function resolveAccountIdentity(workspace: string): Promise<{ name: string; email?: string }> {
+  const auth = await bridge.authStatus();
+  if (auth.loggedIn && (auth.email || auth.orgName)) {
+    const name = auth.orgName ?? auth.email ?? 'Conta Claude';
+    return auth.email ? { name, email: auth.email } : { name };
+  }
+  return bridge.account(workspace);
+}
+
+async function openAccountMenu(): Promise<void> {
+  const menu = el('account-menu');
+  const opening = menu.hidden;
+  menu.hidden = !menu.hidden;
+  if (opening) el('account-menu-email').textContent = currentAccountEmail || '—';
+}
+
+async function signOut(): Promise<void> {
+  el('account-menu').hidden = true;
+  const confirmed = window.confirm(
+    'Sair da conta do Claude Code? Isso desconecta o CLI usado por este app (e por qualquer outro projeto que use o mesmo login) até você entrar novamente.',
+  );
+  if (!confirmed) return;
+  try {
+    await bridge.authLogout();
+    void loadSettings(currentWorkspace);
+  } catch (error) {
+    showNotice('Não foi possível sair', error instanceof Error ? error.message : String(error), true);
+  }
 }
 
 function renderConfig(config: { provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }): void {
@@ -316,7 +502,7 @@ function renderConfig(config: { provider: string; model?: string; web_enabled: b
 
 async function loadSettings(workspace: string): Promise<void> {
   try {
-    const [account, config] = await Promise.all([bridge.account(workspace), bridge.config(workspace)]);
+    const [account, config] = await Promise.all([resolveAccountIdentity(workspace), bridge.config(workspace)]);
     renderAccount(account);
     renderConfig(config);
   } catch (error) {
@@ -1139,6 +1325,19 @@ function handleChromeAction(action: string): void {
     case 'close-settings':
       el('theme-settings').hidden = true;
       return;
+    case 'new-theme':
+      el('theme-form').hidden = false;
+      return;
+    case 'cancel-theme-form':
+      el<HTMLFormElement>('theme-form').hidden = true;
+      el<HTMLFormElement>('theme-form').reset();
+      return;
+    case 'account-menu':
+      void openAccountMenu();
+      return;
+    case 'sign-out':
+      void signOut();
+      return;
     case 'promote':
       void promoteCurrentSession();
       return;
@@ -1170,8 +1369,46 @@ document.addEventListener('change', (event) => {
   }
 });
 
+el<HTMLFormElement>('theme-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const name = el<HTMLInputElement>('theme-form-name').value.trim();
+  if (!name) return;
+  const theme: CustomTheme = {
+    id: `custom-${Date.now()}`,
+    label: name,
+    bg: el<HTMLInputElement>('theme-form-bg').value,
+    bgRaised: el<HTMLInputElement>('theme-form-bg-raised').value,
+    text: el<HTMLInputElement>('theme-form-text').value,
+    border: el<HTMLInputElement>('theme-form-border').value,
+    accent: el<HTMLInputElement>('theme-form-accent').value,
+  };
+  customThemes = [...customThemes, theme];
+  saveCustomThemes(customThemes);
+  renderThemes();
+  applyTheme(theme.id);
+  el<HTMLFormElement>('theme-form').hidden = true;
+  el<HTMLFormElement>('theme-form').reset();
+});
+
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
+
+  const accountMenu = el('account-menu');
+  if (!accountMenu.hidden && !accountMenu.contains(target) && !target.closest('[data-action="account-menu"]')) {
+    accountMenu.hidden = true;
+  }
+
+  const deleteTheme = target.closest<HTMLElement>('[data-delete-theme]');
+  if (deleteTheme?.dataset.deleteTheme) {
+    event.stopPropagation();
+    const id = deleteTheme.dataset.deleteTheme;
+    const wasActive = activeThemeId === id;
+    customThemes = customThemes.filter((theme) => theme.id !== id);
+    saveCustomThemes(customThemes);
+    renderThemes();
+    if (wasActive) applyTheme('dark');
+    return;
+  }
 
   const thoughtSummary = target.closest<HTMLElement>('.thinking__summary');
   if (thoughtSummary) {

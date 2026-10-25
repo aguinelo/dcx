@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, Menu, app, ipcMain, shell } from 'electron';
@@ -29,6 +30,20 @@ function getHarnessWorkspace(): string {
 
 function getHarnessClient(): HarnessClient {
   return new HarnessClient({ baseUrl: process.env.HARNESS_URL ?? 'http://127.0.0.1:8787' });
+}
+
+/** Shells out to the same `claude` CLI the chat provider uses, so the account
+ * menu reflects the real, shared Claude Code login rather than a local guess. */
+function runClaudeAuth(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(process.env.HARNESS_CLAUDE_BIN ?? 'claude', ['auth', ...args], { timeout: 15_000 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr.trim() || error.message));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
 }
 
 function getContext(): ToolContext {
@@ -240,6 +255,24 @@ ipcMain.handle(
     getHarnessClient().setConfig(workspace, updates),
 );
 ipcMain.handle('harness:account', (_event, workspace: string) => getHarnessClient().account(workspace));
+
+ipcMain.handle('auth:status', async () => {
+  try {
+    const stdout = await runClaudeAuth(['status', '--json']);
+    return JSON.parse(stdout) as {
+      loggedIn: boolean;
+      email?: string;
+      orgName?: string;
+      subscriptionType?: string;
+    };
+  } catch (error) {
+    return { loggedIn: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+ipcMain.handle('auth:logout', async () => {
+  await runClaudeAuth(['logout']);
+  return { loggedIn: false };
+});
 ipcMain.handle('harness:promote', (_event, workspace: string, sessionId: string) =>
   getHarnessClient().promote(workspace, sessionId),
 );

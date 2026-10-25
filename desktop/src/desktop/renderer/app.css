@@ -219,6 +219,38 @@
   color-scheme: light;
 }
 
+/*
+ * Lifted directly from the Claude Desktop app bundle (app.asar, design-system
+ * `--cds-*` tokens): --cds-surface-0/1/2 and --cds-text-primary/secondary/muted
+ * are the exact neutral-gray hex values Claude Desktop ships, not an estimate.
+ * The clay accent is Claude's published brand colour, same as :root above.
+ */
+[data-theme="claude"] {
+  --bg: #0b0b0b;
+  --bg-raised: #151515;
+  --bg-hover: #1a1a19;
+  --bg-hover-strong: #20201f;
+  --surface-subtle: rgb(240 239 236 / 3%);
+  --bubble-user: #1a1a19;
+  --border: rgb(240 239 236 / 7%);
+  --border-strong: rgb(240 239 236 / 13%);
+  --text: #f0efec;
+  --muted: #c3c2b7;
+  --faint: #898781;
+  --accent: #d97757;
+  --accent-soft: #b35f42;
+  --ok: #7f9b7a;
+  --warn: #c8963e;
+  --danger: #c9645a;
+  --code-bg: rgb(240 239 236 / 7%);
+  --hint-bg: rgb(11 11 11 / 18%);
+  --tok-str: #8fbf7f;
+  --toggle-knob: #ffffff;
+  --scroll-thumb: rgb(240 239 236 / 14%);
+  --scroll-thumb-hover: rgb(240 239 236 / 24%);
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -449,6 +481,7 @@ button {
 }
 
 .sidebar__footer {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1868,4 +1901,123 @@ textarea {
   border: 1px solid var(--border-strong);
   background: var(--bg);
   color: var(--text);
+}
+
+/* ── Account menu ────────────────────────────────────────────── */
+
+.account-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 10px;
+  width: 220px;
+  padding: 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 60%, transparent);
+  z-index: 40;
+}
+.account-menu[hidden] {
+  display: none;
+}
+.account-menu__email {
+  padding: 6px 8px;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  word-break: break-all;
+}
+.account-menu__divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.account-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-weight: var(--fw-semibold);
+}
+.account-menu__item:hover {
+  background: var(--bg-hover);
+}
+.account-menu__icon {
+  font-size: 14px;
+}
+
+/* ── Custom theme creation ───────────────────────────────────── */
+
+.btn--subtle {
+  margin-top: 8px;
+  border-color: transparent;
+  color: var(--muted);
+}
+.btn--subtle:hover {
+  color: var(--text);
+}
+.theme--custom {
+  position: relative;
+}
+.theme__delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--bg);
+  font-size: 10px;
+  line-height: 1;
+}
+.theme--custom:hover .theme__delete {
+  display: flex;
+}
+.theme-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.theme-form[hidden] {
+  display: none;
+}
+.theme-form input[type='text'] {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+}
+.theme-form__colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.theme-form__colors label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.theme-form__colors input[type='color'] {
+  width: 36px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: none;
+}
+.theme-form__actions {
+  display: flex;
+  gap: 8px;
 }
