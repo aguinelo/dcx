@@ -40,7 +40,7 @@ interface ReplBridge {
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
   workspace(): Promise<string>;
-  sessions(workspace: string): Promise<Array<{ session_id: string; message_count: number; updated_at_unix_ms: number }>>;
+  sessions(workspace: string): Promise<Array<{ session_id: string; title: string; message_count: number; updated_at_unix_ms: number }>>;
   session(workspace: string, sessionId: string): Promise<{ messages: Array<{ role: 'user' | 'assistant'; content: string }> }>;
   projects(root: string): Promise<Array<{ path: string }>>;
   promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }>;
@@ -916,7 +916,7 @@ function setThinking(active: boolean): void {
     editCount = 0;
     thinkingNode = row(
       'thinking',
-      '<button class="thinking__summary" type="button" aria-expanded="true"><span class="thinking__chevron">⌄</span><span class="thinking__label">Thought process</span><span class="thinking__meta"></span></button><div class="thinking__body"></div>',
+      '<button class="thinking__summary" type="button" aria-expanded="true"><span class="thinking__chevron">⌄</span><span class="thinking__label">Thought process</span><span class="thinking__meta"></span></button><div class="thinking__body"></div><div class="thinking__status"><span class="thinking__spinner">◌</span><span>Noodling…</span></div>',
     );
     thinkingBody = thinkingNode.querySelector<HTMLElement>('.thinking__body') ?? undefined;
     thread.append(thinkingNode);
@@ -924,6 +924,8 @@ function setThinking(active: boolean): void {
     scrollToEnd();
   } else if (!active && thinkingNode) {
     thinkingNode.classList.add('thinking--done');
+    const status = thinkingNode.querySelector<HTMLElement>('.thinking__status span:last-child');
+    if (status) status.textContent = 'Concluído';
     updateThoughtSummary();
   }
 }
@@ -965,12 +967,12 @@ async function submit(): Promise<void> {
   if (prompt === '' || busy) return;
 
   busy = true;
-  setThinking(true);
   input.value = '';
   autoGrow();
   setPlaceholder();
   el<HTMLDivElement>('notice').hidden = true;
   addUserMessage(prompt);
+  setThinking(true);
 
   try {
     await bridge.run(prompt);
@@ -1138,7 +1140,7 @@ async function loadHarnessData(): Promise<void> {
     const sessions = await bridge.sessions(workspace);
     renderAllConversations(
       sessions.map((session, index) => ({
-        title: `${session.session_id} · ${session.message_count} mensagens`,
+        title: session.title || 'Nova conversa',
         active: index === 0,
         sessionId: session.session_id,
       })),

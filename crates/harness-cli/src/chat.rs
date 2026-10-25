@@ -46,6 +46,7 @@ pub struct ChatSession {
 #[derive(Clone, Debug, Serialize)]
 pub struct SessionSummary {
     pub session_id: String,
+    pub title: String,
     pub workspace: PathBuf,
     pub provider: String,
     pub model: Option<String>,
@@ -303,9 +304,10 @@ fn system_prompt(workspace: &Path) -> String {
     format!(
         "Você é o Harness em modo conversa read-only.\n\
          Projeto atual: {}.\n\
+         É obrigatório responder em português do Brasil (pt-BR), mesmo que o histórico, os arquivos ou a pergunta estejam em outro idioma. Não responda em inglês, salvo quando o usuário pedir explicitamente.\n\
          Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. Nunca edite, crie, apague ou execute comandos; não use Bash. Não altere o projeto.\n\
          Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir implementação, explique que isso exige iniciar um run com contrato e sensores; não escreva arquivos.\n\
-         Responda no idioma do usuário, de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
+         Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
         workspace.display()
     )
 }
@@ -490,6 +492,7 @@ pub fn list_sessions(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
             continue;
         };
         sessions.push(SessionSummary {
+            title: session_title(&session),
             session_id: session.session_id,
             workspace: session.workspace,
             provider: session.provider,
@@ -501,6 +504,22 @@ pub fn list_sessions(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at_unix_ms));
     Ok(sessions)
+}
+
+fn session_title(session: &ChatSession) -> String {
+    let source = session
+        .messages
+        .iter()
+        .find(|message| message.role == "user")
+        .map(|message| message.content.trim())
+        .filter(|content| !content.is_empty())
+        .unwrap_or("Nova conversa");
+    let title = source.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.chars().count() > 48 {
+        format!("{}…", title.chars().take(47).collect::<String>())
+    } else {
+        title
+    }
 }
 
 pub fn open_session(workspace: &Path, session_id: Option<&str>) -> Result<ChatSession, String> {
