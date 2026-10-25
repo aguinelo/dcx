@@ -13,7 +13,7 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R6 | Isolamento de ambiente e sandbox opt-in dos sensores | concluída no macOS e Linux |
 | R7 | Provider `auto`, CI e documentação operacional | concluída |
 | R8 | Passos paralelos, retomada e múltiplos runs | concluída; demo live de plano paralelo pendente |
-| R9 | Sessão conversacional read-only e base do app desktop | em andamento (M9.1 concluído) |
+| R9 | Sessão conversacional read-only e base do app desktop | em andamento (M9.1 e M9.2 concluídos) |
 
 ## Critérios de saída
 
@@ -22,8 +22,8 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 - **R6:** sensores não herdam o ambiente do usuário e podem rodar sob `sandbox-exec` no macOS ou `bwrap` no Linux, com rede e escrita fora do workspace bloqueadas.
 - **R7:** `HARNESS_PROVIDER=auto` tenta Claude e cai para Codex; CI roda fmt, testes, clippy, schemas e as demos; cada run registra chamadas, latência e custo conhecido em `metrics.json`.
 - **R8:** passos independentes executam em worktrees separadas; um run interrompido retoma do último passo concluído; dois runs concorrentes não colidem.
-- **R9:** `harness chat` mantém sessão persistente, streama a resposta, retoma histórico e não altera arquivos fora de `.harness/sessions`; o modo usa Claude em `plan` com apenas `Read`, `Glob` e `Grep`.
+- **R9:** `harness chat` mantém sessão persistente, streama a resposta, retoma histórico e não altera arquivos fora de `.harness/sessions`; `harness serve` expõe a mesma sessão por SSE local; o modo usa Claude/MiniMax em `plan` com apenas `Read`, `Glob` e `Grep`.
 
 ## Próxima rodada
 
-M9.1 entrega `harness chat` read-only, persistente e com streaming. O próximo passo é M9.2: expor a mesma sessão por um daemon local (`harness serve`) com HTTP e SSE, para que o app desktop consuma conversa, projeto e início de run sem reimplementar o motor.
+M9.1 e M9.2 entregam conversa read-only e daemon local. O próximo passo é M9.3: catálogo real de sessões e promoção explícita de conversa para run, para que o app desktop consuma projeto e início de execução sem reimplementar o motor.

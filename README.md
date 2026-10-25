@@ -87,4 +87,12 @@ Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_P
 
 `harness` carrega `.env` do diretório atual antes de ler a configuração; `harness chat --workspace <dir>` também carrega o `.env` daquele projeto. Use `HARNESS_ENV_FILE=<arquivo>` para apontar outro arquivo explicitamente. As chaves e configurações de provider lidas do `.env` são aplicadas diretamente aos processos do Claude/MiniMax, então não precisam ser exportadas no shell.
 
+Para abrir a API local que um app desktop pode consumir:
+
+```sh
+cargo run -q -p harness-cli -- serve --bind 127.0.0.1:8787
+```
+
+O daemon expõe `GET /health`, `GET /sessions` e `POST /chat`. O último recebe `workspace`, `session_id` opcional e `message` em JSON, retornando eventos SSE `session`, `token`, `done` ou `error`. Ele continua local e read-only; ainda não inicia runs nem escreve no projeto.
+
 O `.env` é ignorado pelo Git, não é copiado para o workspace isolado de um run e não pode ser aplicado de volta pelo merge gate, então chaves como `ANTHROPIC_API_KEY` e `MINIMAX_API_KEY` podem ficar nele sem serem enviadas ao executor. O `.env.example` versionado documenta os providers, modelos e chaves.

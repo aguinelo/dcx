@@ -464,6 +464,50 @@ pub fn list(workspace_arg: Option<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
+pub fn open_session(workspace: &Path, session_id: Option<&str>) -> Result<ChatSession, String> {
+    match session_id {
+        Some(id) => load_session(workspace, id),
+        None => new_session(workspace),
+    }
+}
+
+pub fn send_message(
+    workspace: &Path,
+    session: &mut ChatSession,
+    message: &str,
+    on_text: &mut dyn FnMut(&str),
+) -> Result<ChatReply, String> {
+    if message.trim().is_empty() {
+        return Err("mensagem vazia".to_owned());
+    }
+    session.messages.push(ChatMessage {
+        role: "user".to_owned(),
+        content: message.to_owned(),
+        created_at_unix_ms: now_ms(),
+        cost_usd: None,
+        duration_ms: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    let mut provider = ClaudeChatProvider::new(workspace)?;
+    session.provider = provider.provider_name().to_owned();
+    session.model = provider.model().map(str::to_owned);
+    save_session(workspace, session)?;
+    let prompt = build_prompt(&session.messages);
+    let reply = provider.send(workspace, &prompt, on_text)?;
+    session.messages.push(ChatMessage {
+        role: "assistant".to_owned(),
+        content: reply.text.clone(),
+        created_at_unix_ms: now_ms(),
+        cost_usd: reply.cost_usd,
+        duration_ms: Some(reply.duration_ms),
+        input_tokens: reply.input_tokens,
+        output_tokens: reply.output_tokens,
+    });
+    save_session(workspace, session)?;
+    Ok(reply)
+}
+
 fn resolve_workspace(workspace_arg: Option<PathBuf>) -> Result<PathBuf, String> {
     let path = match workspace_arg {
         Some(path) => path,

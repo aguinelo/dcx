@@ -9,6 +9,7 @@ mod lock;
 mod metrics;
 mod providers;
 mod schemas;
+mod serve;
 mod state;
 mod workspace;
 
@@ -76,6 +77,26 @@ fn main() {
             };
             if let Err(error) = result {
                 eprintln!("Falha no chat: {error}");
+                std::process::exit(1);
+            }
+        }
+        Some("serve") => {
+            let mut bind = "127.0.0.1:8787".to_owned();
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--bind" => bind = args.next().unwrap_or_default(),
+                    _ => {
+                        eprintln!("Uso: harness serve [--bind <host:porta>]");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            if bind.is_empty() {
+                eprintln!("Uso: harness serve [--bind <host:porta>]");
+                std::process::exit(2);
+            }
+            if let Err(error) = serve::run(&bind) {
+                eprintln!("Falha no servidor: {error}");
                 std::process::exit(1);
             }
         }
@@ -185,7 +206,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|resume --run <run_id>|dispute --run <run_id> --sensor <sensor_id> --reason <motivo>|state prune --older-than-days <N> [--dry-run]|--version|run --demo|--pilot|--job-02|--request <pedido>>"
+                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|resume --run <run_id>|dispute --run <id> ...|state prune ...|--version|run ...>"
             );
             std::process::exit(2);
         }
