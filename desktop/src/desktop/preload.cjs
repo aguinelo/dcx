@@ -29,4 +29,8 @@ contextBridge.exposeInMainWorld('repl', {
       handler = () => {};
     };
   },
+
+  workspace: () => ipcRenderer.invoke('harness:workspace'),
+  sessions: (workspace) => ipcRenderer.invoke('harness:sessions', workspace),
+  projects: (root) => ipcRenderer.invoke('harness:projects', root),
 });

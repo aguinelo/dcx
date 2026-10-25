@@ -218,3 +218,9 @@ ipcMain.handle('session:context', (_event, usedTokens: number) => {
     percent: Math.round((used / CONTEXT_LIMIT_TOKENS) * 100),
   };
 });
+
+ipcMain.handle('harness:workspace', () => getHarnessWorkspace());
+ipcMain.handle('harness:sessions', (_event, workspace: string) =>
+  getHarnessClient().sessions(workspace),
+);
+ipcMain.handle('harness:projects', (_event, root: string) => getHarnessClient().projects(root));

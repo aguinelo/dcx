@@ -6,25 +6,9 @@
  */
 
 import {
-  ALL_CONVERSATIONS,
-  BACKGROUND_COMPLETED,
-  BACKGROUND_TASKS,
-  type BackgroundTask,
-  CHANGES,
-  CONNECTORS_STALE,
-  CONTEXT_BREAKDOWN,
   CONTEXT_USED,
-  CURRENT_BRANCH,
-  type ChangeItem,
-  type ContextSlice,
-  type Conversation,
-  ENVIRONMENT,
-  MEMORY_FILES,
-  PINNED,
-  PROJECT_GROUPS,
-  type ProjectGroup,
   TERMINAL_SESSIONS,
-  TRANSCRIPT,
+  type BackgroundTask,
   type TranscriptItem,
 } from './mock.ts';
 import {
@@ -54,6 +38,9 @@ interface ReplBridge {
   cancel(): Promise<boolean>;
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
+  workspace(): Promise<string>;
+  sessions(workspace: string): Promise<Array<{ session_id: string; message_count: number; updated_at_unix_ms: number }>>;
+  projects(root: string): Promise<Array<{ path: string }>>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;
@@ -75,7 +62,7 @@ let busy = false;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
-function conversationNode(item: Conversation): HTMLElement {
+function conversationNode(item: { title: string; active?: boolean }): HTMLElement {
   const node = document.createElement('li');
   if (item.active) node.classList.add('is-active');
 
@@ -89,31 +76,14 @@ function conversationNode(item: Conversation): HTMLElement {
 
   node.append(glyph, title);
 
-  if (item.warning) {
-    const warn = document.createElement('span');
-    warn.className = 'warn';
-    warn.textContent = '⚠';
-    node.append(warn);
-  }
-  if (item.unread) {
-    const dot = document.createElement('span');
-    dot.className = 'unread';
-    node.append(dot);
-  }
   return node;
 }
 
-function renderPinned(): void {
-  el<HTMLUListElement>('pinned').replaceChildren(...PINNED.map(conversationNode));
+function renderAllConversations(items: Array<{ title: string; active?: boolean }>): void {
+  el<HTMLUListElement>('all-conversations').replaceChildren(...items.map(conversationNode));
 }
 
-function renderAllConversations(): void {
-  el<HTMLUListElement>('all-conversations').replaceChildren(
-    ...ALL_CONVERSATIONS.map(conversationNode),
-  );
-}
-
-function projectSection(group: ProjectGroup): HTMLElement {
+function projectSection(group: { name: string; items: Array<{ title: string; active?: boolean }> }): HTMLElement {
   const section = document.createElement('section');
   section.className = 'group';
 
@@ -136,10 +106,6 @@ function projectSection(group: ProjectGroup): HTMLElement {
 
   section.append(title, list);
   return section;
-}
-
-function renderProjects(): void {
-  el('groups').replaceChildren(...PROJECT_GROUPS.map(projectSection));
 }
 
 function envNode(glyph: string, label: string, config = false): HTMLElement {
@@ -167,10 +133,8 @@ function envNode(glyph: string, label: string, config = false): HTMLElement {
   return node;
 }
 
-function renderEnvironment(): void {
-  const rows = ENVIRONMENT.map((item, index) => envNode(item.glyph, item.label, index === 0));
-  rows.push(envNode('⑂', CURRENT_BRANCH));
-  el<HTMLUListElement>('env').replaceChildren(...rows);
+function renderEnvironment(workspace: string): void {
+  el<HTMLUListElement>('env').replaceChildren(envNode('▣', workspace, true));
 }
 
 /**
@@ -186,107 +150,22 @@ function formatTokens(value: number): string {
   return String(value);
 }
 
-function breakdownNode(slice: ContextSlice): HTMLElement {
-  const node = document.createElement('li');
-
-  const swatch = document.createElement('span');
-  swatch.className = 'swatch';
-  swatch.style.background = slice.color;
-
-  const label = document.createElement('span');
-  label.className = 'label';
-  label.textContent = slice.label;
-
-  const tokens = document.createElement('span');
-  tokens.className = 'tokens';
-  tokens.textContent = formatTokens(slice.tokens);
-
-  const percent = document.createElement('span');
-  percent.className = 'pct';
-  percent.textContent = slice.percent;
-
-  node.append(swatch, label, tokens, percent);
-  return node;
-}
-
 function renderBreakdown(): void {
-  const nodes = CONTEXT_BREAKDOWN.map(breakdownNode);
-
-  const memory = document.createElement('li');
-  const memoryLabel = document.createElement('span');
-  memoryLabel.className = 'label';
-  memoryLabel.textContent = 'Arquivos de memória';
-  const memoryCount = document.createElement('span');
-  memoryCount.className = 'pct';
-  memoryCount.textContent = String(MEMORY_FILES);
-  memory.append(memoryLabel, memoryCount);
-
-  el<HTMLUListElement>('breakdown').replaceChildren(...nodes, memory);
-}
-
-function formatCount(value: number): string {
-  if (value < 1000) return String(value);
-  return `${(value / 1000).toFixed(1).replace('.', ',')} mil`;
-}
-
-function changeNode(item: ChangeItem): HTMLElement {
-  const node = document.createElement('li');
-  node.className = 'change';
-
-  const title = document.createElement('div');
-  title.className = 'change__title';
-  title.append(document.createTextNode(item.title));
-  if (item.ready) {
-    const dot = document.createElement('span');
-    dot.className = 'change__status';
-    title.append(dot);
-  }
-
-  const repo = document.createElement('div');
-  repo.className = 'change__repo';
-  repo.textContent = `${item.repo} #${item.number}`;
-
-  const stat = document.createElement('div');
-  stat.className = 'change__stat';
-
-  const added = document.createElement('span');
-  added.className = 'change__add';
-  added.textContent = `+${formatCount(item.additions)}`;
-
-  const removed = document.createElement('span');
-  removed.className = 'change__del';
-  removed.textContent = `−${formatCount(item.deletions)}`;
-
-  const files = document.createElement('span');
-  files.className = 'muted';
-  files.textContent = `${item.files} arquivos`;
-
-  stat.append(added, removed, files);
-
-  const action = document.createElement('button');
-  action.className = item.ready ? 'btn btn--done' : 'btn';
-  action.textContent = item.ready ? 'Pronto' : 'Marcar como pronto';
-  action.disabled = item.ready;
-
-  node.append(title, repo, stat, action);
-  return node;
+  el<HTMLUListElement>('breakdown').replaceChildren();
 }
 
 function renderPanel(): void {
-  el('connectors').textContent = `${CONNECTORS_STALE} para reconectar`;
+  el('connectors').textContent = 'nenhum conectado';
   renderBreakdown();
-  el<HTMLUListElement>('changes').replaceChildren(...CHANGES.map(changeNode));
+  el<HTMLUListElement>('changes').replaceChildren();
 }
 
-function renderStaticRegions(): void {
-  renderAllConversations();
-  renderPinned();
-  renderProjects();
-  renderEnvironment();
+function renderStaticRegions(workspace: string): void {
+  renderAllConversations([]);
+  el<HTMLUListElement>('pinned').replaceChildren();
+  el('groups').replaceChildren();
+  renderEnvironment(workspace);
   renderPanel();
-  renderTerminal('repl');
-  renderBackground();
-  startBackgroundTicker();
   renderThemes();
   let savedTheme = 'dark';
   try {
@@ -363,8 +242,8 @@ function renderThemes(): void {
 /* ── Background tasks ────────────────────────────────────────── */
 
 /* Cloned so the mock stays a seed rather than mutable render state. */
-const backgroundTasks: BackgroundTask[] = BACKGROUND_TASKS.map((task) => ({ ...task }));
-let backgroundCompleted = BACKGROUND_COMPLETED;
+const backgroundTasks: BackgroundTask[] = [];
+let backgroundCompleted = 0;
 
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds} s`;
@@ -392,19 +271,6 @@ function renderBackground(): void {
     `<span class="bgtask__glyph">◇</span><span class="bgtask__title">${backgroundCompleted} concluídas</span>`,
   );
   el('bg-tasks').replaceChildren(...running, done);
-}
-
-/** The counter is what sells "still running" — it has to actually move. */
-function startBackgroundTicker(): void {
-  window.setInterval(() => {
-    let moved = false;
-    for (const task of backgroundTasks) {
-      if (!task.running) continue;
-      task.elapsed += 1;
-      moved = true;
-    }
-    if (moved) renderBackground();
-  }, 1000);
 }
 
 function stopBackgroundTask(id: string): void {
@@ -652,11 +518,6 @@ function transcriptNode(item: TranscriptItem): HTMLElement {
         `<span class="artifact__badge">${escapeHtml(item.badge)}</span><span class="artifact__label">${escapeHtml(item.label)}</span><span class="artifact__meta">${escapeHtml(item.meta)}</span>`,
       );
   }
-}
-
-/** Opens on a real conversation so the thread is never empty on launch. */
-function seedTranscript(): void {
-  for (const item of TRANSCRIPT) thread.append(transcriptNode(item));
 }
 
 /* ── Orchestrated run ────────────────────────────────────────── */
@@ -1039,6 +900,12 @@ function handleChromeAction(action: string): void {
     case 'stop-sim':
       finishSimulation();
       return;
+    case 'settings':
+      el('theme-settings').hidden = false;
+      return;
+    case 'close-settings':
+      el('theme-settings').hidden = true;
+      return;
     case 'new':
       thread.replaceChildren();
       accumulatedTokens = 0;
@@ -1077,8 +944,35 @@ document.addEventListener('click', (event) => {
   if (action) handleChromeAction(action);
 });
 
-renderStaticRegions();
-seedTranscript();
+async function loadHarnessData(): Promise<void> {
+  try {
+    const workspace = await bridge.workspace();
+    renderStaticRegions(workspace);
+    const connection = el('connection-state');
+    connection.textContent = 'Harness conectado';
+    const sessions = await bridge.sessions(workspace);
+    renderAllConversations(
+      sessions.map((session, index) => ({
+        title: `${session.session_id} · ${session.message_count} mensagens`,
+        active: index === 0,
+      })),
+    );
+    const projects = await bridge.projects(workspace);
+    el('groups').replaceChildren(
+      projectSection({
+        name: 'Workspaces',
+        items: projects.map((project) => ({ title: project.path })),
+      }),
+    );
+    el('project-chip').firstChild!.textContent = workspace;
+  } catch (error) {
+    el('connection-state').textContent = 'Harness offline';
+    showNotice('Harness indisponível', error instanceof Error ? error.message : String(error), true);
+    renderStaticRegions('Workspace não selecionado');
+  }
+}
+
+void loadHarnessData();
 void updateContext(CONTEXT_USED);
 setPlaceholder();
 input.focus();

@@ -58,7 +58,7 @@
 
         <footer class="sidebar__footer">
           <button class="account"><span class="avatar">A</span> <span>Aguinelo</span> <span class="muted">Max</span> <span class="chev">▾</span></button>
-          <button class="iconbtn" title="Configurações">⚙</button>
+          <button class="iconbtn" data-action="settings" title="Configurações">⚙</button>
         </footer>
       </aside>
 
@@ -77,10 +77,8 @@
           </div>
           <div class="composer__meta">
             <div class="composer__meta-left">
-              <button class="meta-chip meta-chip--action" id="sim-start" data-action="simulate">▶ Simular loop</button>
-              <button class="meta-chip meta-chip--stop" id="sim-stop" data-action="stop-sim" hidden>■ Parar</button>
-              <button class="meta-chip">Automático</button>
-              <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
+              <span class="meta-chip">Harness</span>
+              <span class="meta-chip" id="connection-state">Desconectado</span>
             </div>
             <button class="meta-chip">claude-sonnet-4-5 <span class="muted">Alto</span> <span class="dot dot--danger"></span></button>
           </div>
@@ -146,6 +144,14 @@
         </header>
         <div class="terminal__body" id="terminal-body"></div>
       </aside>
+    </div>
+
+    <div class="theme-settings" id="theme-settings" hidden>
+      <div class="theme-settings__card">
+        <h2>Tema</h2>
+        <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
+        <button class="btn" data-action="close-settings">Fechar</button>
+      </div>
     </div>
 
     <script type="module" src="./renderer.js"></script>
