@@ -57,6 +57,17 @@ export interface HarnessAccount {
   email?: string;
 }
 
+export interface HarnessPullRequest {
+  title: string;
+  repo: string;
+  number: number;
+  url: string;
+  additions: number;
+  deletions: number;
+  files: number;
+  ready: boolean;
+}
+
 export interface HarnessClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -97,6 +108,10 @@ export class HarnessClient {
 
   async githubRepos(limit = 6): Promise<{ repos: string[] }> {
     return this.get(`/github/repos?limit=${limit}`);
+  }
+
+  async githubPrs(limit = 5): Promise<{ prs: HarnessPullRequest[] }> {
+    return this.get(`/github/prs?limit=${limit}`);
   }
 
   async projects(root: string): Promise<HarnessProject[]> {

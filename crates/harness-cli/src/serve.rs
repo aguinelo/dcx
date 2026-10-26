@@ -3,7 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::chat;
@@ -150,6 +150,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/account") => handle_account(&mut stream, query),
         ("GET", "/git/branch") => handle_git_branch(&mut stream, query),
         ("GET", "/github/repos") => handle_github_repos(&mut stream, query),
+        ("GET", "/github/prs") => handle_github_prs(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -505,6 +506,100 @@ fn github_repos(limit: u32) -> Vec<String> {
         .filter_map(|repo| repo.get("full_name").and_then(Value::as_str))
         .map(str::to_owned)
         .collect()
+}
+
+#[derive(Debug, Serialize)]
+struct PullRequestSummary {
+    title: String,
+    repo: String,
+    number: u64,
+    url: String,
+    additions: u64,
+    deletions: u64,
+    files: u64,
+    ready: bool,
+}
+
+fn handle_github_prs(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let limit = query_value(query, "limit")
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(5);
+    let prs = github_prs(limit);
+    respond_json(stream, 200, &serde_json::json!({"prs": prs}).to_string())
+}
+
+/// This user's own open pull requests across every repo the local `gh` login
+/// can see, enriched one by one with diff stats (the search API doesn't
+/// return those). Same fail-quiet contract as `github_repos`.
+fn github_prs(limit: u32) -> Vec<PullRequestSummary> {
+    let output = std::process::Command::new("gh")
+        .args([
+            "search",
+            "prs",
+            "--author",
+            "@me",
+            "--state",
+            "open",
+            "--json",
+            "title,number,repository,isDraft,url",
+            "--limit",
+            &limit.to_string(),
+        ])
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(github_pr_summary)
+        .collect()
+}
+
+fn github_pr_summary(entry: &Value) -> Option<PullRequestSummary> {
+    let title = entry.get("title")?.as_str()?.to_owned();
+    let number = entry.get("number")?.as_u64()?;
+    let repo = entry
+        .get("repository")?
+        .get("nameWithOwner")?
+        .as_str()?
+        .to_owned();
+    let url = entry.get("url")?.as_str()?.to_owned();
+    let is_draft = entry.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
+
+    let stats = std::process::Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &number.to_string(),
+            "--repo",
+            &repo,
+            "--json",
+            "additions,deletions,changedFiles",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok());
+
+    Some(PullRequestSummary {
+        title,
+        repo,
+        number,
+        url,
+        additions: stats.as_ref().and_then(|s| s.get("additions")).and_then(Value::as_u64).unwrap_or(0),
+        deletions: stats.as_ref().and_then(|s| s.get("deletions")).and_then(Value::as_u64).unwrap_or(0),
+        files: stats.as_ref().and_then(|s| s.get("changedFiles")).and_then(Value::as_u64).unwrap_or(0),
+        ready: !is_draft,
+    })
 }
 
 fn git_branch(workspace: &Path) -> Option<String> {

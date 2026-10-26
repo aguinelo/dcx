@@ -60,6 +60,9 @@ interface ReplBridge {
   account(workspace: string): Promise<{ name: string; email?: string }>;
   gitBranch(workspace: string): Promise<{ branch: string | null }>;
   githubRepos(): Promise<{ repos: string[] }>;
+  githubPrs(): Promise<{
+    prs: Array<{ title: string; repo: string; number: number; url: string; additions: number; deletions: number; files: number; ready: boolean }>;
+  }>;
   authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
   authLogout(): Promise<{ loggedIn: boolean }>;
 }
@@ -296,6 +299,39 @@ function renderPanel(): void {
   el('connectors').textContent = 'nenhum conectado';
   renderBreakdown();
   el<HTMLUListElement>('changes').replaceChildren();
+  void renderChanges();
+}
+
+function changeNode(pr: { title: string; repo: string; number: number; url: string; additions: number; deletions: number; files: number; ready: boolean }): HTMLElement {
+  const node = document.createElement('li');
+  node.className = 'change';
+  node.innerHTML = [
+    `<div class="change__title">${escapeHtml(pr.title)}</div>`,
+    `<div class="change__repo">${escapeHtml(pr.repo)} #${pr.number}</div>`,
+    '<div class="change__stat">',
+    `<span class="change__add">+${pr.additions}</span>`,
+    `<span class="change__del">-${pr.deletions}</span>`,
+    `<span>${pr.files} arquivo${pr.files === 1 ? '' : 's'}</span>`,
+    `<span class="change__status" style="background:${pr.ready ? 'var(--ok)' : 'var(--muted)'}" title="${pr.ready ? 'Pronto para revisão' : 'Rascunho'}"></span>`,
+    '</div>',
+  ].join('');
+  node.addEventListener('click', () => shellOpen(pr.url));
+  return node;
+}
+
+/** Opens a PR link in the OS browser; swallows the error since this panel is
+ * informational, not a blocking action. */
+function shellOpen(url: string): void {
+  window.open(url, '_blank');
+}
+
+async function renderChanges(): Promise<void> {
+  try {
+    const { prs } = await bridge.githubPrs();
+    el<HTMLUListElement>('changes').replaceChildren(...prs.map(changeNode));
+  } catch {
+    // `gh` not installed or not logged in on this machine — leave it empty.
+  }
 }
 
 function renderStaticRegions(workspace: string): void {
