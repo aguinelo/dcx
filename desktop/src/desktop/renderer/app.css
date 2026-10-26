@@ -49,28 +49,25 @@
 
   /* ── Colour ───────────────────────────────────────────────────
    * Every colour in this file resolves through one of the tokens below.
-   * The values on :root are the "dark" theme and are duplicated by the
-   * [data-theme] blocks further down, which exist so each theme is a
-   * complete, self-describing palette rather than a partial override.
-   *
-   * The set is deliberately split into neutrals (bg / text / border) and
-   * signal colours (accent / ok / warn / danger): themes vary both
-   * independently, which is what proves the layout never depends on a
-   * specific hue.
+   * The values on :root are the dark theme, lifted directly from the
+   * installed Claude Desktop app bundle (app.asar, its `--cds-*` design
+   * tokens: --cds-surface-0/1/2 and --cds-text-primary/secondary/muted),
+   * not estimated. [data-theme="light"] is that same bundle's light mode.
+   * This app ships only those two themes, matching Claude Desktop itself.
    */
 
   /* Neutrals */
-  --bg: #131312;
-  --bg-raised: #1b1b19;
-  --bg-hover: #262624;
-  --bg-hover-strong: #33332f;
-  --surface-subtle: rgb(245 238 228 / 2%);
-  --bubble-user: #2b2b28;
-  --border: rgb(245 238 228 / 7%);
-  --border-strong: rgb(245 238 228 / 13%);
-  --text: #f0eee9;
-  --muted: #9b968e;
-  --faint: #6f6a63;
+  --bg: #0b0b0b;
+  --bg-raised: #151515;
+  --bg-hover: #1a1a19;
+  --bg-hover-strong: #20201f;
+  --surface-subtle: rgb(240 239 236 / 3%);
+  --bubble-user: #1a1a19;
+  --border: rgb(240 239 236 / 7%);
+  --border-strong: rgb(240 239 236 / 13%);
+  --text: #f0efec;
+  --muted: #c3c2b7;
+  --faint: #898781;
 
   /* Signal. Claude's brand clay-orange is the default accent. */
   --accent: #d97757;
@@ -80,12 +77,12 @@
   --danger: #c9645a;
 
   /* Component-level surfaces that would otherwise be inline literals */
-  --code-bg: rgb(245 238 228 / 7%);
-  --hint-bg: rgb(19 19 18 / 18%);
+  --code-bg: rgb(240 239 236 / 7%);
+  --hint-bg: rgb(11 11 11 / 18%);
   --tok-str: #8fbf7f;
   --toggle-knob: #ffffff;
-  --scroll-thumb: rgb(245 238 228 / 14%);
-  --scroll-thumb-hover: rgb(245 238 228 / 24%);
+  --scroll-thumb: rgb(240 239 236 / 14%);
+  --scroll-thumb-hover: rgb(240 239 236 / 24%);
 
   color-scheme: dark;
 
@@ -110,145 +107,32 @@
  * never change how the app is laid out — only how it is coloured.
  */
 
-/* Claude's own light canvas: warm cream, near-black ink, same clay accent. */
+/* Claude Desktop's own light mode: --cds-surface-0/1 and
+ * --cds-text-primary/secondary/muted, exact hex from the same app bundle. */
 [data-theme="light"] {
-  --bg: #f2f0ea;
-  --bg-raised: #fbfaf6;
-  --bg-hover: #eae7de;
-  --bg-hover-strong: #dedacf;
-  --surface-subtle: rgb(20 19 18 / 3%);
-  --bubble-user: #eceae2;
-  --border: rgb(20 19 18 / 9%);
-  --border-strong: rgb(20 19 18 / 17%);
-  --text: #141413;
-  --muted: #5f5b54;
-  --faint: #8b857c;
+  --bg: #f9f9f7;
+  --bg-raised: #fcfcfb;
+  --bg-hover: #f0efec;
+  --bg-hover-strong: #e4e3dd;
+  --surface-subtle: rgb(11 11 11 / 3%);
+  --bubble-user: #f0efec;
+  --border: rgb(11 11 11 / 7%);
+  --border-strong: rgb(11 11 11 / 13%);
+  --text: #0b0b0b;
+  --muted: #52514e;
+  --faint: #898781;
   --accent: #c15f3c;
   --accent-soft: #a84f31;
   --ok: #4f7a4a;
   --warn: #96671f;
   --danger: #b3453c;
-  --code-bg: rgb(20 19 18 / 6%);
+  --code-bg: rgb(11 11 11 / 6%);
   --hint-bg: rgb(255 255 255 / 55%);
   --tok-str: #3f7a3a;
   --toggle-knob: #ffffff;
-  --scroll-thumb: rgb(20 19 18 / 16%);
-  --scroll-thumb-hover: rgb(20 19 18 / 28%);
+  --scroll-thumb: rgb(11 11 11 / 16%);
+  --scroll-thumb-hover: rgb(11 11 11 / 28%);
   color-scheme: light;
-}
-
-/* Pure black on a cool neutral ramp, with a blue accent. If the layout is
- * hue-dependent, this is where it shows. */
-[data-theme="oled"] {
-  --bg: #000000;
-  --bg-raised: #0c0c0e;
-  --bg-hover: #1a1a1d;
-  --bg-hover-strong: #26262a;
-  --surface-subtle: rgb(255 255 255 / 4%);
-  --bubble-user: #17171a;
-  --border: rgb(255 255 255 / 10%);
-  --border-strong: rgb(255 255 255 / 20%);
-  --text: #f5f5f7;
-  --muted: #9b9ba3;
-  --faint: #6c6c74;
-  --accent: #5b8def;
-  --accent-soft: #4470d0;
-  --ok: #4aa564;
-  --warn: #d9a441;
-  --danger: #e05a5a;
-  --code-bg: rgb(255 255 255 / 8%);
-  --hint-bg: rgb(0 0 0 / 30%);
-  --tok-str: #7fd18a;
-  --toggle-knob: #ffffff;
-  --scroll-thumb: rgb(255 255 255 / 18%);
-  --scroll-thumb-hover: rgb(255 255 255 / 30%);
-  color-scheme: dark;
-}
-
-/* Violet-tinted dark. Same lightness ladder as dark, different hue family. */
-[data-theme="dusk"] {
-  --bg: #16151c;
-  --bg-raised: #1e1d26;
-  --bg-hover: #2a2934;
-  --bg-hover-strong: #383645;
-  --surface-subtle: rgb(226 220 255 / 4%);
-  --bubble-user: #24232e;
-  --border: rgb(226 220 255 / 9%);
-  --border-strong: rgb(226 220 255 / 18%);
-  --text: #eceaf5;
-  --muted: #9e9ab0;
-  --faint: #6f6b80;
-  --accent: #a78bfa;
-  --accent-soft: #8b6ee8;
-  --ok: #6fae7f;
-  --warn: #d2a04a;
-  --danger: #e06a72;
-  --code-bg: rgb(226 220 255 / 8%);
-  --hint-bg: rgb(22 21 28 / 40%);
-  --tok-str: #86d9a8;
-  --toggle-knob: #ffffff;
-  --scroll-thumb: rgb(226 220 255 / 16%);
-  --scroll-thumb-hover: rgb(226 220 255 / 28%);
-  color-scheme: dark;
-}
-
-/* Aged paper. A second light theme, warmer and lower-contrast than "light". */
-[data-theme="sepia"] {
-  --bg: #f4ece0;
-  --bg-raised: #fbf6ee;
-  --bg-hover: #e9dfd0;
-  --bg-hover-strong: #ddd0bd;
-  --surface-subtle: rgb(60 40 20 / 4%);
-  --bubble-user: #ece1d2;
-  --border: rgb(60 40 20 / 12%);
-  --border-strong: rgb(60 40 20 / 22%);
-  --text: #2a231a;
-  --muted: #6b5f4f;
-  --faint: #968876;
-  --accent: #a85a2b;
-  --accent-soft: #8c4a22;
-  --ok: #5d7a4e;
-  --warn: #96701f;
-  --danger: #a8453a;
-  --code-bg: rgb(60 40 20 / 7%);
-  --hint-bg: rgb(255 255 255 / 50%);
-  --tok-str: #4a7a3f;
-  --toggle-knob: #ffffff;
-  --scroll-thumb: rgb(60 40 20 / 18%);
-  --scroll-thumb-hover: rgb(60 40 20 / 30%);
-  color-scheme: light;
-}
-
-/*
- * Lifted directly from the Claude Desktop app bundle (app.asar, design-system
- * `--cds-*` tokens): --cds-surface-0/1/2 and --cds-text-primary/secondary/muted
- * are the exact neutral-gray hex values Claude Desktop ships, not an estimate.
- * The clay accent is Claude's published brand colour, same as :root above.
- */
-[data-theme="claude"] {
-  --bg: #0b0b0b;
-  --bg-raised: #151515;
-  --bg-hover: #1a1a19;
-  --bg-hover-strong: #20201f;
-  --surface-subtle: rgb(240 239 236 / 3%);
-  --bubble-user: #1a1a19;
-  --border: rgb(240 239 236 / 7%);
-  --border-strong: rgb(240 239 236 / 13%);
-  --text: #f0efec;
-  --muted: #c3c2b7;
-  --faint: #898781;
-  --accent: #d97757;
-  --accent-soft: #b35f42;
-  --ok: #7f9b7a;
-  --warn: #c8963e;
-  --danger: #c9645a;
-  --code-bg: rgb(240 239 236 / 7%);
-  --hint-bg: rgb(11 11 11 / 18%);
-  --tok-str: #8fbf7f;
-  --toggle-knob: #ffffff;
-  --scroll-thumb: rgb(240 239 236 / 14%);
-  --scroll-thumb-hover: rgb(240 239 236 / 24%);
-  color-scheme: dark;
 }
 
 * {
@@ -1948,76 +1832,3 @@ textarea {
   font-size: 14px;
 }
 
-/* ── Custom theme creation ───────────────────────────────────── */
-
-.btn--subtle {
-  margin-top: 8px;
-  border-color: transparent;
-  color: var(--muted);
-}
-.btn--subtle:hover {
-  color: var(--text);
-}
-.theme--custom {
-  position: relative;
-}
-.theme__delete {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 14px;
-  height: 14px;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--danger);
-  color: var(--bg);
-  font-size: 10px;
-  line-height: 1;
-}
-.theme--custom:hover .theme__delete {
-  display: flex;
-}
-.theme-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.theme-form[hidden] {
-  display: none;
-}
-.theme-form input[type='text'] {
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--bg);
-  color: var(--text);
-}
-.theme-form__colors {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.theme-form__colors label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: var(--fs-caption);
-  color: var(--muted);
-}
-.theme-form__colors input[type='color'] {
-  width: 36px;
-  height: 24px;
-  padding: 0;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: none;
-}
-.theme-form__actions {
-  display: flex;
-  gap: 8px;
-}
