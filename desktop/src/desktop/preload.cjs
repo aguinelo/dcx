@@ -14,7 +14,7 @@ ipcRenderer.on('agent:event', (_event, payload) => handler(payload));
 
 contextBridge.exposeInMainWorld('repl', {
   /** Start a turn. Resolves when the turn ends, however it ends. */
-  run: (prompt, sessionId) => ipcRenderer.invoke('agent:run', prompt, sessionId),
+  run: (prompt, workspace, sessionId) => ipcRenderer.invoke('agent:run', prompt, workspace, sessionId),
 
   /** Abort the turn in flight. */
   cancel: () => ipcRenderer.invoke('agent:cancel'),

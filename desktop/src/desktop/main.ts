@@ -163,7 +163,7 @@ app.on('window-all-closed', () => {
  * so the sandbox and permission gate stay in the main process where the
  * filesystem and shell actually live.
  */
-ipcMain.handle('agent:run', async (_event, prompt: string, activeSessionId?: string) => {
+ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | undefined, activeSessionId?: string) => {
   const send = (payload: unknown): void => {
     if (mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send('agent:event', payload);
@@ -175,7 +175,7 @@ ipcMain.handle('agent:run', async (_event, prompt: string, activeSessionId?: str
     if (process.env.REPL_DESKTOP_LOCAL !== '1') {
       const client = getHarnessClient();
       await client.chat(
-        getHarnessWorkspace(),
+        workspace || getHarnessWorkspace(),
         prompt,
         activeSessionId,
         (event) => {

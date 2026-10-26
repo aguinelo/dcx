@@ -26,7 +26,7 @@ interface AgentEventPayload {
 }
 
 interface ReplBridge {
-  run(prompt: string, sessionId?: string): Promise<void>;
+  run(prompt: string, workspace: string, sessionId?: string): Promise<void>;
   cancel(): Promise<boolean>;
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
@@ -506,7 +506,10 @@ function renderConfig(config: { provider: string; model?: string; web_enabled: b
   }
   el<HTMLInputElement>('settings-web').checked = config.web_enabled;
   el<HTMLInputElement>('settings-max-tool-calls').value = String(config.max_tool_calls);
-  el('settings-model').textContent = config.model ? `Modelo: ${config.model}` : 'Modelo: via Harness';
+  const providerLabel = config.provider === 'minimax' ? 'MiniMax' : 'Claude';
+  const modelLabel = config.model ?? 'modelo padrão';
+  el('settings-model').textContent = `Modelo: ${providerLabel} · ${modelLabel}`;
+  el('model-state').textContent = `${providerLabel} · ${modelLabel}`;
 }
 
 async function loadSettings(workspace: string): Promise<void> {
@@ -1042,7 +1045,7 @@ async function submit(): Promise<void> {
   setThinking(true);
 
   try {
-    await bridge.run(prompt, currentSessionId);
+    await bridge.run(prompt, currentWorkspace, currentSessionId);
   } catch (error) {
     showNotice(
       'Falha ao iniciar o turno',
