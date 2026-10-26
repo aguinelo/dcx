@@ -90,6 +90,10 @@ export class HarnessClient {
     return this.get(`/account?workspace=${encodeURIComponent(workspace)}`);
   }
 
+  async gitBranch(workspace: string): Promise<{ branch: string | null }> {
+    return this.get(`/git/branch?workspace=${encodeURIComponent(workspace)}`);
+  }
+
   async projects(root: string): Promise<HarnessProject[]> {
     const response = await this.get<{ projects: string[] }>(
       `/projects?root=${encodeURIComponent(root)}`,

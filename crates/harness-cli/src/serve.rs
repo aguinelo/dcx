@@ -139,6 +139,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/config") => handle_get_config(&mut stream, query),
         ("POST", "/config") => handle_set_config(&mut stream, body),
         ("GET", "/account") => handle_account(&mut stream, query),
+        ("GET", "/git/branch") => handle_git_branch(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -332,10 +333,15 @@ fn handle_projects(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     let mut projects = Vec::new();
     for entry in std::fs::read_dir(&root).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
-        if entry
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_dir()
+        let is_hidden = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with('.'));
+        if !is_hidden
+            && entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
         {
             projects.push(entry.path());
         }
@@ -421,6 +427,32 @@ fn handle_account(stream: &mut TcpStream, query: &str) -> Result<(), String> {
         200,
         &serde_json::json!({"name": name, "email": email}).to_string(),
     )
+}
+
+fn handle_git_branch(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /git/branch exige ?workspace=<diretório>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let branch = git_branch(&workspace);
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"branch": branch}).to_string(),
+    )
+}
+
+fn git_branch(workspace: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(workspace)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty() && value != "HEAD").then(|| value.to_owned())
 }
 
 fn git_config(workspace: &Path, key: &str) -> Option<String> {

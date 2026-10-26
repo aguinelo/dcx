@@ -65,6 +65,7 @@ interface ReplBridge {
     updates: Partial<{ provider: string; web_enabled: boolean; max_tool_calls: number }>,
   ): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   account(workspace: string): Promise<{ name: string; email?: string }>;
+  gitBranch(workspace: string): Promise<{ branch: string | null }>;
   authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
   authLogout(): Promise<{ loggedIn: boolean }>;
 }
@@ -198,8 +199,30 @@ function envNode(glyph: string, label: string, config = false): HTMLElement {
   return node;
 }
 
-function renderEnvironment(workspace: string): void {
-  el<HTMLUListElement>('env').replaceChildren(envNode('▣', workspace, true));
+async function renderEnvironment(workspace: string): Promise<void> {
+  const name = workspace.replace(/\/+$/, '').split('/').pop() || workspace;
+  const rows = [envNode('▣', name, true)];
+
+  try {
+    const { branch } = await bridge.gitBranch(workspace);
+    if (branch) rows.push(envNode('⑂', branch));
+  } catch {
+    // Not a git repo, or git unavailable — just skip the branch row.
+  }
+
+  try {
+    const parent = workspace.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/';
+    const siblings = await bridge.projects(parent);
+    for (const project of siblings) {
+      if (project.path === workspace) continue;
+      const siblingName = project.path.replace(/\/+$/, '').split('/').pop() || project.path;
+      rows.push(envNode('▢', siblingName));
+    }
+  } catch {
+    // No sibling projects to list — the current workspace alone is fine.
+  }
+
+  el<HTMLUListElement>('env').replaceChildren(...rows);
 }
 
 /**
@@ -229,7 +252,7 @@ function renderStaticRegions(workspace: string): void {
   renderAllConversations([]);
   el<HTMLUListElement>('pinned').replaceChildren();
   el('groups').replaceChildren();
-  renderEnvironment(workspace);
+  void renderEnvironment(workspace);
   renderPanel();
   renderThemes();
   let savedTheme = 'dark';

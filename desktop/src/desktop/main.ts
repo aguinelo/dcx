@@ -255,6 +255,7 @@ ipcMain.handle(
     getHarnessClient().setConfig(workspace, updates),
 );
 ipcMain.handle('harness:account', (_event, workspace: string) => getHarnessClient().account(workspace));
+ipcMain.handle('harness:gitBranch', (_event, workspace: string) => getHarnessClient().gitBranch(workspace));
 
 ipcMain.handle('auth:status', async () => {
   try {
