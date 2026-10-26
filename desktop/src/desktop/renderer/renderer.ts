@@ -99,7 +99,7 @@ let editCount = 0;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
-function conversationNode(item: { title: string; active?: boolean; sessionId?: string; pinned?: boolean }): HTMLElement {
+function conversationNode(item: { title: string; active?: boolean; sessionId?: string; pinned?: boolean; workspacePath?: string }): HTMLElement {
   const node = document.createElement('li');
   if (item.active) node.classList.add('is-active');
 
@@ -112,6 +112,11 @@ function conversationNode(item: { title: string; active?: boolean; sessionId?: s
   title.textContent = item.title;
 
   node.append(glyph, title);
+
+  if (item.workspacePath) {
+    node.dataset.workspacePath = item.workspacePath;
+    node.title = item.workspacePath;
+  }
 
   if (item.sessionId) {
     node.dataset.sessionId = item.sessionId;
@@ -197,7 +202,7 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
   }
 }
 
-function projectSection(group: { name: string; items: Array<{ title: string; active?: boolean }> }): HTMLElement {
+function projectSection(group: { name: string; items: Array<{ title: string; active?: boolean; workspacePath?: string }> }): HTMLElement {
   const section = document.createElement('section');
   section.className = 'group';
 
@@ -220,6 +225,28 @@ function projectSection(group: { name: string; items: Array<{ title: string; act
 
   section.append(title, list);
   return section;
+}
+
+async function switchWorkspace(workspace: string): Promise<void> {
+  if (!workspace || workspace === currentWorkspace || busy) return;
+  currentWorkspace = workspace;
+  currentSessionId = undefined;
+  thread.replaceChildren();
+  streamingAssistantBody = undefined;
+  streamingAssistantText = '';
+  streamingPendingText = '';
+  thinkingNode = undefined;
+  thinkingBody = undefined;
+  accumulatedTokens = 0;
+  lastUsageTotals = { messages: 0, cacheCreate: 0, output: 0 };
+  el<HTMLButtonElement>('promote-run').hidden = true;
+  void updateContext(0);
+  try {
+    localStorage.setItem('harness.workspace', workspace);
+  } catch {
+    // Keep the selection for this window when storage is unavailable.
+  }
+  await loadHarnessData(workspace);
 }
 
 function envNode(glyph: string, label: string, config = false): HTMLElement {
@@ -1108,6 +1135,12 @@ document.addEventListener('change', (event) => {
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
 
+  const workspaceNode = target.closest<HTMLElement>('[data-workspace-path]');
+  if (workspaceNode?.dataset.workspacePath) {
+    void switchWorkspace(workspaceNode.dataset.workspacePath);
+    return;
+  }
+
   const accountMenu = el('account-menu');
   if (!accountMenu.hidden && !accountMenu.contains(target) && !target.closest('[data-action="account-menu"]')) {
     accountMenu.hidden = true;
@@ -1154,9 +1187,15 @@ document.addEventListener('click', (event) => {
   if (action) handleChromeAction(action);
 });
 
-async function loadHarnessData(): Promise<void> {
+async function loadHarnessData(workspaceOverride?: string): Promise<void> {
   try {
-    const workspace = await bridge.workspace();
+    let savedWorkspace: string | null = null;
+    try {
+      savedWorkspace = localStorage.getItem('harness.workspace');
+    } catch {
+      // Use the configured default when local storage is unavailable.
+    }
+    const workspace = workspaceOverride ?? savedWorkspace ?? await bridge.workspace();
     currentWorkspace = workspace;
     renderStaticRegions(workspace);
     const connection = el('connection-state');
@@ -1165,11 +1204,16 @@ async function loadHarnessData(): Promise<void> {
     const sessions = await bridge.sessions(workspace);
     if (sessions[0]) await loadSession(workspace, sessions[0].session_id);
     renderSessionLists(sessions);
-    const projects = await bridge.projects(workspace);
+    const parent = workspace.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/';
+    const projects = await bridge.projects(parent);
     el('groups').replaceChildren(
       projectSection({
         name: 'Workspaces',
-        items: projects.map((project) => ({ title: project.path })),
+        items: projects.map((project) => ({
+          title: project.path.replace(/\/+$/, '').split('/').pop() || project.path,
+          workspacePath: project.path,
+          active: project.path === workspace,
+        })),
       }),
     );
     el('project-chip').firstChild!.textContent = workspace.replace(/\/+$/, '').split('/').pop() || workspace;
