@@ -296,13 +296,14 @@ function initials(name: string): string {
 
 let currentAccountEmail = '';
 
-function renderAccount(account: { name: string; email?: string }): void {
+function renderAccount(account: { name: string; email?: string; plan?: string }): void {
   const mark = initials(account.name);
   currentAccountEmail = account.email ?? '';
+  const displayName = account.plan ? `${account.name} · ${account.plan}` : account.name;
   el('sidebar-avatar').textContent = mark;
-  el('sidebar-account-name').textContent = account.name;
+  el('sidebar-account-name').textContent = displayName;
   el('settings-avatar').textContent = mark;
-  el('settings-account-name').textContent = account.name;
+  el('settings-account-name').textContent = displayName;
   el('settings-account-email').textContent = currentAccountEmail;
 }
 
@@ -312,11 +313,12 @@ function renderAccount(account: { name: string; email?: string }): void {
  * actually authenticates chat turns. Falls back to git when logged out or
  * when `claude` isn't the active provider's CLI.
  */
-async function resolveAccountIdentity(workspace: string): Promise<{ name: string; email?: string }> {
+async function resolveAccountIdentity(workspace: string): Promise<{ name: string; email?: string; plan?: string }> {
   const auth = await bridge.authStatus();
   if (auth.loggedIn && (auth.email || auth.orgName)) {
     const name = auth.orgName ?? auth.email ?? 'Conta Claude';
-    return auth.email ? { name, email: auth.email } : { name };
+    const plan = auth.subscriptionType ? auth.subscriptionType.charAt(0).toUpperCase() + auth.subscriptionType.slice(1) : undefined;
+    return { ...(auth.email ? { name, email: auth.email } : { name }), ...(plan ? { plan } : {}) };
   }
   return bridge.account(workspace);
 }
@@ -1287,7 +1289,7 @@ async function loadHarnessData(): Promise<void> {
         items: projects.map((project) => ({ title: project.path })),
       }),
     );
-    el('project-chip').firstChild!.textContent = workspace;
+    el('project-chip').firstChild!.textContent = workspace.replace(/\/+$/, '').split('/').pop() || workspace;
   } catch (error) {
     el('connection-state').textContent = 'Harness offline';
     showNotice('Harness indisponível', error instanceof Error ? error.message : String(error), true);
