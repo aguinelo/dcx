@@ -288,7 +288,7 @@ ipcMain.handle('harness:start', async (_event, workspace: string, sessionId: str
   const started = await client.start(workspace, sessionId);
   void client.events(workspace, started.run_id, (event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:event', { type: 'run_event', event: event.event, data: event.data });
+      mainWindow.webContents.send('agent:event', { type: 'run_event', event: event.event, data: event.data, runId: started.run_id });
     }
   }).catch((error) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -297,3 +297,4 @@ ipcMain.handle('harness:start', async (_event, workspace: string, sessionId: str
   });
   return started;
 });
+ipcMain.handle('harness:cancelRun', (_event, workspace: string, runId: string) => getHarnessClient().cancel(workspace, runId));

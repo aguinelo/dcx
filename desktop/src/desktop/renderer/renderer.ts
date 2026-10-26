@@ -22,6 +22,7 @@ interface AgentEventPayload {
   event?: string;
   data?: Record<string, unknown>;
   sessionId?: string;
+  runId?: string;
 }
 
 interface ReplBridge {
@@ -52,6 +53,7 @@ interface ReplBridge {
   promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }>;
   approve(workspace: string, sessionId: string): Promise<unknown>;
   start(workspace: string, sessionId: string): Promise<{ run_id: string; status: string }>;
+  cancelRun(workspace: string, runId: string): Promise<void>;
   config(workspace: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   setConfig(
     workspace: string,
@@ -539,7 +541,32 @@ function stopBackgroundTask(id: string): void {
   task.running = false;
   backgroundCompleted += 1;
   renderBackground();
+  if (currentWorkspace) void bridge.cancelRun(currentWorkspace, id).catch(() => {});
 }
+
+function addRunTask(runId: string, title: string): void {
+  backgroundTasks.push({ id: runId, glyph: '>_', title, elapsed: 0, running: true });
+  renderBackground();
+}
+
+function finishRunTask(runId: string): void {
+  const task = backgroundTasks.find((entry) => entry.id === runId);
+  if (!task?.running) return;
+  task.running = false;
+  backgroundCompleted += 1;
+  renderBackground();
+}
+
+window.setInterval(() => {
+  let changed = false;
+  for (const task of backgroundTasks) {
+    if (task.running) {
+      task.elapsed += 1;
+      changed = true;
+    }
+  }
+  if (changed) renderBackground();
+}, 1000);
 
 /* ── Transcript ──────────────────────────────────────────────── */
 
@@ -894,11 +921,13 @@ bridge.onEvent((payload) => {
       } else if (payload.event === 'done') {
         flushAssistantStream();
         addAssistantMessage('Run concluído.');
+        if (payload.runId) finishRunTask(payload.runId);
         busy = false;
         setPlaceholder();
         setThinking(false);
       } else if (payload.event === 'failed' || payload.event === 'cancelled') {
         showNotice('Run encerrado', payload.event, payload.event === 'failed');
+        if (payload.runId) finishRunTask(payload.runId);
         busy = false;
         setPlaceholder();
         setThinking(false);
@@ -959,6 +988,7 @@ async function promoteCurrentSession(): Promise<void> {
     busy = true;
     setThinking(true);
     setPlaceholder();
+    addRunTask(started.run_id, firstLine(preview.request));
     showNotice('Run iniciado', `Job ${started.run_id} em execução.`, false);
   } catch (error) {
     showNotice('Não foi possível iniciar o run', error instanceof Error ? error.message : String(error), true);

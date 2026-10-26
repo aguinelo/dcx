@@ -46,4 +46,5 @@ contextBridge.exposeInMainWorld('repl', {
   promote: (workspace, sessionId) => ipcRenderer.invoke('harness:promote', workspace, sessionId),
   approve: (workspace, sessionId) => ipcRenderer.invoke('harness:approve', workspace, sessionId),
   start: (workspace, sessionId) => ipcRenderer.invoke('harness:start', workspace, sessionId),
+  cancelRun: (workspace, runId) => ipcRenderer.invoke('harness:cancelRun', workspace, runId),
 });
