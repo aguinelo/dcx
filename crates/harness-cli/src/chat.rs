@@ -57,6 +57,7 @@ pub struct SessionSummary {
     pub message_count: usize,
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
+    pub pinned: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -662,6 +663,7 @@ pub fn list_sessions(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
     if !root.is_dir() {
         return Ok(Vec::new());
     }
+    let pinned_ids = load_pinned(workspace);
     let entries = fs::read_dir(&root)
         .map_err(|error| format!("não foi possível ler {}: {error}", root.display()))?;
     let mut sessions = Vec::new();
@@ -680,6 +682,7 @@ pub fn list_sessions(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
             continue;
         };
         sessions.push(SessionSummary {
+            pinned: pinned_ids.contains(&session.session_id),
             title: session_title(&session),
             session_id: session.session_id,
             workspace: session.workspace,
@@ -692,6 +695,39 @@ pub fn list_sessions(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at_unix_ms));
     Ok(sessions)
+}
+
+fn pinned_path(workspace: &Path) -> PathBuf {
+    workspace.join(".harness").join("pinned.json")
+}
+
+fn load_pinned(workspace: &Path) -> Vec<String> {
+    let Ok(bytes) = fs::read(pinned_path(workspace)) else {
+        return Vec::new();
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+/// Pins or unpins a session. Errors only on an unwritable `.harness`
+/// directory; pinning a session that no longer exists is harmless (it just
+/// won't show up until a session with that id exists again).
+pub fn set_pinned(workspace: &Path, session_id: &str, pinned: bool) -> Result<(), String> {
+    validate_session_id(session_id)?;
+    let mut ids = load_pinned(workspace);
+    let already_pinned = ids.iter().any(|id| id == session_id);
+    if pinned && !already_pinned {
+        ids.push(session_id.to_owned());
+    } else if !pinned {
+        ids.retain(|id| id != session_id);
+    }
+    let path = pinned_path(workspace);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("não foi possível criar {}: {error}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec(&ids).map_err(|error| error.to_string())?;
+    fs::write(&path, bytes)
+        .map_err(|error| format!("não foi possível gravar {}: {error}", path.display()))
 }
 
 fn session_title(session: &ChatSession) -> String {

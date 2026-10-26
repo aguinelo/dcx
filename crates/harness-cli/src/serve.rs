@@ -46,6 +46,13 @@ struct CancelRunRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct SetPinnedRequest {
+    workspace: String,
+    session_id: String,
+    pinned: bool,
+}
+
+#[derive(Debug, Deserialize)]
 struct SetConfigRequest {
     workspace: String,
     #[serde(default)]
@@ -124,6 +131,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
     match (method, route) {
         ("GET", "/health") => respond_json(&mut stream, 200, r#"{"status":"ok"}"#),
         ("GET", "/sessions") => handle_sessions(&mut stream, query),
+        ("POST", "/sessions/pin") => handle_set_pinned(&mut stream, body),
         ("GET", "/session") => handle_session(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
         ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
@@ -152,6 +160,18 @@ fn handle_sessions(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     let body = serde_json::to_string(&serde_json::json!({"sessions": sessions}))
         .map_err(|error| format!("não foi possível serializar sessões: {error}"))?;
     respond_json(stream, 200, &body)
+}
+
+fn handle_set_pinned(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: SetPinnedRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let workspace = PathBuf::from(request.workspace);
+    chat::set_pinned(&workspace, &request.session_id, request.pinned)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"session_id": request.session_id, "pinned": request.pinned}).to_string(),
+    )
 }
 
 fn handle_session(stream: &mut TcpStream, query: &str) -> Result<(), String> {

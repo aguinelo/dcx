@@ -244,6 +244,9 @@ ipcMain.handle('harness:workspace', () => getHarnessWorkspace());
 ipcMain.handle('harness:sessions', (_event, workspace: string) =>
   getHarnessClient().sessions(workspace),
 );
+ipcMain.handle('harness:setPinned', (_event, workspace: string, sessionId: string, pinned: boolean) =>
+  getHarnessClient().setPinned(workspace, sessionId, pinned),
+);
 ipcMain.handle('harness:session', (_event, workspace: string, sessionId: string) =>
   getHarnessClient().session(workspace, sessionId),
 );

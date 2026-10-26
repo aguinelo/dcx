@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('repl', {
 
   workspace: () => ipcRenderer.invoke('harness:workspace'),
   sessions: (workspace) => ipcRenderer.invoke('harness:sessions', workspace),
+  setPinned: (workspace, sessionId, pinned) => ipcRenderer.invoke('harness:setPinned', workspace, sessionId, pinned),
   session: (workspace, sessionId) => ipcRenderer.invoke('harness:session', workspace, sessionId),
   projects: (root) => ipcRenderer.invoke('harness:projects', root),
   config: (workspace) => ipcRenderer.invoke('harness:config', workspace),

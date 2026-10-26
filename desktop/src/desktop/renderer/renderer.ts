@@ -40,7 +40,10 @@ interface ReplBridge {
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
   workspace(): Promise<string>;
-  sessions(workspace: string): Promise<Array<{ session_id: string; title: string; message_count: number; updated_at_unix_ms: number }>>;
+  sessions(
+    workspace: string,
+  ): Promise<Array<{ session_id: string; title: string; message_count: number; updated_at_unix_ms: number; pinned: boolean }>>;
+  setPinned(workspace: string, sessionId: string, pinned: boolean): Promise<{ pinned: boolean }>;
   session(
     workspace: string,
     sessionId: string,
@@ -100,7 +103,7 @@ let editCount = 0;
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
-function conversationNode(item: { title: string; active?: boolean; sessionId?: string }): HTMLElement {
+function conversationNode(item: { title: string; active?: boolean; sessionId?: string; pinned?: boolean }): HTMLElement {
   const node = document.createElement('li');
   if (item.active) node.classList.add('is-active');
 
@@ -113,13 +116,62 @@ function conversationNode(item: { title: string; active?: boolean; sessionId?: s
   title.textContent = item.title;
 
   node.append(glyph, title);
-  if (item.sessionId) node.dataset.sessionId = item.sessionId;
+
+  if (item.sessionId) {
+    node.dataset.sessionId = item.sessionId;
+    const pin = document.createElement('button');
+    pin.className = 'conv-pin';
+    pin.dataset.action = 'toggle-pin';
+    pin.dataset.pinned = String(item.pinned ?? false);
+    pin.title = item.pinned ? 'Desafixar' : 'Fixar';
+    pin.textContent = item.pinned ? '★' : '☆';
+    node.append(pin);
+  }
 
   return node;
 }
 
-function renderAllConversations(items: Array<{ title: string; active?: boolean; sessionId?: string }>): void {
+function renderAllConversations(items: Array<{ title: string; active?: boolean; sessionId?: string; pinned?: boolean }>): void {
   el<HTMLUListElement>('all-conversations').replaceChildren(...items.map(conversationNode));
+}
+
+function renderPinned(items: Array<{ title: string; active?: boolean; sessionId?: string; pinned?: boolean }>): void {
+  el<HTMLUListElement>('pinned').replaceChildren(...items.map(conversationNode));
+}
+
+async function togglePin(sessionId: string, pinned: boolean): Promise<void> {
+  try {
+    await bridge.setPinned(currentWorkspace, sessionId, pinned);
+    const sessions = await bridge.sessions(currentWorkspace);
+    renderSessionLists(sessions);
+  } catch (error) {
+    showNotice('Não foi possível fixar', error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+function renderSessionLists(
+  sessions: Array<{ session_id: string; title: string; pinned: boolean }>,
+): void {
+  renderPinned(
+    sessions
+      .filter((session) => session.pinned)
+      .map((session) => ({
+        title: session.title || 'Nova conversa',
+        sessionId: session.session_id,
+        pinned: true,
+        active: session.session_id === currentSessionId,
+      })),
+  );
+  renderAllConversations(
+    sessions
+      .filter((session) => !session.pinned)
+      .map((session) => ({
+        title: session.title || 'Nova conversa',
+        sessionId: session.session_id,
+        pinned: false,
+        active: session.session_id === currentSessionId,
+      })),
+  );
 }
 
 async function loadSession(workspace: string, sessionId: string): Promise<void> {
@@ -1336,6 +1388,14 @@ document.addEventListener('click', (event) => {
     return;
   }
 
+  const pinToggle = target.closest<HTMLElement>('[data-action="toggle-pin"]');
+  if (pinToggle) {
+    event.stopPropagation();
+    const sessionId = pinToggle.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId;
+    if (sessionId) void togglePin(sessionId, pinToggle.dataset.pinned !== 'true');
+    return;
+  }
+
   const sessionNode = target.closest<HTMLElement>('[data-session-id]');
   if (sessionNode?.dataset.sessionId) {
     void bridge.workspace().then((workspace) => loadSession(workspace, sessionNode.dataset.sessionId!));
@@ -1375,14 +1435,8 @@ async function loadHarnessData(): Promise<void> {
     connection.textContent = 'Harness conectado';
     void loadSettings(workspace);
     const sessions = await bridge.sessions(workspace);
-    renderAllConversations(
-      sessions.map((session, index) => ({
-        title: session.title || 'Nova conversa',
-        active: index === 0,
-        sessionId: session.session_id,
-      })),
-    );
     if (sessions[0]) await loadSession(workspace, sessions[0].session_id);
+    renderSessionLists(sessions);
     const projects = await bridge.projects(workspace);
     el('groups').replaceChildren(
       projectSection({

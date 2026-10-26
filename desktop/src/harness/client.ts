@@ -10,6 +10,7 @@ export interface HarnessSession {
   message_count: number;
   created_at_unix_ms: number;
   updated_at_unix_ms: number;
+  pinned: boolean;
 }
 
 export interface HarnessMessage {
@@ -106,6 +107,10 @@ export class HarnessClient {
       `/sessions?workspace=${encodeURIComponent(workspace)}`,
     );
     return response.sessions;
+  }
+
+  async setPinned(workspace: string, sessionId: string, pinned: boolean): Promise<{ pinned: boolean }> {
+    return this.post('/sessions/pin', { workspace, session_id: sessionId, pinned });
   }
 
   async session(workspace: string, sessionId: string): Promise<HarnessSessionDetail> {

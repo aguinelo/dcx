@@ -356,6 +356,21 @@ button {
   color: var(--warn);
   font-size: 11px;
 }
+.conv-pin {
+  flex: none;
+  margin-left: auto;
+  padding: 0 2px;
+  color: var(--faint);
+  font-size: 12px;
+  opacity: 0;
+}
+.conversations li:hover .conv-pin,
+.conv-pin[data-pinned='true'] {
+  opacity: 1;
+}
+.conv-pin[data-pinned='true'] {
+  color: var(--accent);
+}
 .conversations .unread {
   width: 5px;
   height: 5px;
