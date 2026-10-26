@@ -95,6 +95,10 @@ export class HarnessClient {
     return this.get(`/git/branch?workspace=${encodeURIComponent(workspace)}`);
   }
 
+  async githubRepos(limit = 6): Promise<{ repos: string[] }> {
+    return this.get(`/github/repos?limit=${limit}`);
+  }
+
   async projects(root: string): Promise<HarnessProject[]> {
     const response = await this.get<{ projects: string[] }>(
       `/projects?root=${encodeURIComponent(root)}`,

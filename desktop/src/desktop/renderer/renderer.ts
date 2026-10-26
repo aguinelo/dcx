@@ -69,6 +69,7 @@ interface ReplBridge {
   ): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   account(workspace: string): Promise<{ name: string; email?: string }>;
   gitBranch(workspace: string): Promise<{ branch: string | null }>;
+  githubRepos(): Promise<{ repos: string[] }>;
   authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
   authLogout(): Promise<{ loggedIn: boolean }>;
 }
@@ -272,6 +273,13 @@ async function renderEnvironment(workspace: string): Promise<void> {
     }
   } catch {
     // No sibling projects to list — the current workspace alone is fine.
+  }
+
+  try {
+    const { repos } = await bridge.githubRepos();
+    for (const repo of repos) rows.push(envNode('⊞', repo));
+  } catch {
+    // `gh` not installed or not logged in on this machine — skip silently.
   }
 
   el<HTMLUListElement>('env').replaceChildren(...rows);

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::chat;
 
@@ -148,6 +149,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/config") => handle_set_config(&mut stream, body),
         ("GET", "/account") => handle_account(&mut stream, query),
         ("GET", "/git/branch") => handle_git_branch(&mut stream, query),
+        ("GET", "/github/repos") => handle_github_repos(&mut stream, query),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -459,6 +461,50 @@ fn handle_git_branch(stream: &mut TcpStream, query: &str) -> Result<(), String> 
         200,
         &serde_json::json!({"branch": branch}).to_string(),
     )
+}
+
+fn handle_github_repos(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let limit = query_value(query, "limit")
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(6);
+    let repos = github_repos(limit);
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"repos": repos}).to_string(),
+    )
+}
+
+/// Most recently pushed-to repos the local `gh` login can see (own repos plus
+/// every org it belongs to). Uses whatever `gh auth` already has on this
+/// machine; returns an empty list rather than an error when `gh` is missing
+/// or not logged in, since this is a decorative panel, not a blocking action.
+fn github_repos(limit: u32) -> Vec<String> {
+    let output = std::process::Command::new("gh")
+        .args([
+            "api",
+            &format!(
+                "user/repos?sort=pushed&per_page={limit}&affiliation=owner,collaborator,organization_member"
+            ),
+        ])
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|repo| repo.get("full_name").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn git_branch(workspace: &Path) -> Option<String> {
