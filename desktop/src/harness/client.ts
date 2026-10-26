@@ -16,6 +16,12 @@ export interface HarnessMessage {
   role: 'user' | 'assistant';
   content: string;
   created_at_unix_ms: number;
+  cost_usd?: number;
+  duration_ms?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 export interface HarnessSessionDetail extends HarnessSession {

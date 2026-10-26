@@ -28,6 +28,10 @@ pub struct ChatMessage {
     pub input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,6 +81,8 @@ pub struct ChatReply {
     pub duration_ms: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub cache_creation_input_tokens: Option<u64>,
+    pub cache_read_input_tokens: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -296,6 +302,8 @@ impl ChatProvider for ClaudeChatProvider {
         let mut duration_ms = None;
         let mut input_tokens = None;
         let mut output_tokens = None;
+        let mut cache_creation_input_tokens = None;
+        let mut cache_read_input_tokens = None;
         let mut parse_error = None;
         let mut tool_calls = 0_usize;
 
@@ -409,6 +417,14 @@ impl ChatProvider for ClaudeChatProvider {
                         .get("usage")
                         .and_then(|usage| usage.get("output_tokens"))
                         .and_then(Value::as_u64);
+                    cache_creation_input_tokens = value
+                        .get("usage")
+                        .and_then(|usage| usage.get("cache_creation_input_tokens"))
+                        .and_then(Value::as_u64);
+                    cache_read_input_tokens = value
+                        .get("usage")
+                        .and_then(|usage| usage.get("cache_read_input_tokens"))
+                        .and_then(Value::as_u64);
                 }
                 _ => {}
             }
@@ -455,6 +471,8 @@ impl ChatProvider for ClaudeChatProvider {
             duration_ms: duration_ms.unwrap_or_else(|| started.elapsed().as_millis() as u64),
             input_tokens,
             output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
         })
     }
 }
@@ -570,6 +588,8 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
             duration_ms: None,
             input_tokens: None,
             output_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
         });
         save_session(&workspace, &mut session)?;
 
@@ -597,6 +617,8 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
                     duration_ms: Some(reply.duration_ms),
                     input_tokens: reply.input_tokens,
                     output_tokens: reply.output_tokens,
+                    cache_creation_input_tokens: reply.cache_creation_input_tokens,
+                    cache_read_input_tokens: reply.cache_read_input_tokens,
                 });
                 save_session(&workspace, &mut session)?;
             }
@@ -819,6 +841,8 @@ pub fn send_message_with_events(
         duration_ms: None,
         input_tokens: None,
         output_tokens: None,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
     });
     let mut provider = ClaudeChatProvider::new(workspace)?;
     session.provider = provider.provider_name().to_owned();
@@ -854,6 +878,8 @@ pub fn send_message_with_events(
         duration_ms: Some(reply.duration_ms),
         input_tokens: reply.input_tokens,
         output_tokens: reply.output_tokens,
+        cache_creation_input_tokens: reply.cache_creation_input_tokens,
+        cache_read_input_tokens: reply.cache_read_input_tokens,
     });
     save_session(workspace, session)?;
     Ok(reply)
@@ -1072,6 +1098,8 @@ mod tests {
                 duration_ms: None,
                 input_tokens: None,
                 output_tokens: None,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             ChatMessage {
                 role: "assistant".to_owned(),
@@ -1081,6 +1109,8 @@ mod tests {
                 duration_ms: None,
                 input_tokens: None,
                 output_tokens: None,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
         ];
         let prompt = build_prompt(&messages);
@@ -1107,6 +1137,8 @@ mod tests {
                 duration_ms: None,
                 input_tokens: None,
                 output_tokens: None,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             });
         }
         let session_id = session.session_id.clone();

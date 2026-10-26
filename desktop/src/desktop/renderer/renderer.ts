@@ -41,7 +41,20 @@ interface ReplBridge {
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
   workspace(): Promise<string>;
   sessions(workspace: string): Promise<Array<{ session_id: string; title: string; message_count: number; updated_at_unix_ms: number }>>;
-  session(workspace: string, sessionId: string): Promise<{ messages: Array<{ role: 'user' | 'assistant'; content: string }> }>;
+  session(
+    workspace: string,
+    sessionId: string,
+  ): Promise<{
+    messages: Array<{
+      role: 'user' | 'assistant';
+      content: string;
+      cost_usd?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    }>;
+  }>;
   projects(root: string): Promise<Array<{ path: string }>>;
   promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }>;
   approve(workspace: string, sessionId: string): Promise<unknown>;
@@ -127,6 +140,9 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
     document.querySelectorAll('[data-session-id]').forEach((node) => {
       node.classList.toggle('is-active', (node as HTMLElement).dataset.sessionId === sessionId);
     });
+    lastUsageTotals = sumUsage(session.messages);
+    accumulatedTokens = lastUsageTotals.messages + lastUsageTotals.cacheCreate + lastUsageTotals.output;
+    void updateContext(accumulatedTokens);
   } catch (error) {
     showNotice('Falha ao carregar sessão', error instanceof Error ? error.message : String(error), true);
   }
@@ -923,6 +939,68 @@ async function updateContext(used: number): Promise<void> {
   ctxCount.textContent = `${formatTokens(info.used)} / ${formatTokens(info.limit)}`;
   const headroom = el('ctx-headroom');
   headroom.textContent = `${formatTokens(info.limit - info.used)} até o auto-compact`;
+  return renderContextBreakdown(used, info.limit);
+}
+
+interface UsageTotals {
+  messages: number;
+  cacheCreate: number;
+  output: number;
+}
+
+/**
+ * Sums the real per-turn usage the Claude CLI reports (cache_read_input_tokens
+ * doubles as "history re-sent this turn", which is why it is folded into
+ * "Mensagens" rather than its own row — it has no separate meaning to a user).
+ */
+function sumUsage(messages: Array<{ input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }>): UsageTotals {
+  let messagesTotal = 0;
+  let cacheCreate = 0;
+  let output = 0;
+  for (const message of messages) {
+    messagesTotal += (message.input_tokens ?? 0) + (message.cache_read_input_tokens ?? 0);
+    cacheCreate += message.cache_creation_input_tokens ?? 0;
+    output += message.output_tokens ?? 0;
+  }
+  return { messages: messagesTotal, cacheCreate, output };
+}
+
+function breakdownRow(label: string, tokens: number, pct: number, color?: string): HTMLElement {
+  const node = document.createElement('li');
+  if (!color) node.classList.add('is-headroom');
+  node.innerHTML = [
+    `<span class="swatch"${color ? ` style="background:${color}"` : ''}></span>`,
+    `<span class="label">${escapeHtml(label)}</span>`,
+    `<span class="tokens">${formatTokens(tokens)}</span>`,
+    `<span class="pct">${color ? `${pct}%` : ''}</span>`,
+  ].join('');
+  return node;
+}
+
+function renderContextBreakdown(used: number, limit: number): void {
+  const totals = lastUsageTotals;
+  const rows: Array<{ label: string; tokens: number; color: string }> = [
+    { label: 'Mensagens', tokens: totals.messages, color: '#5b8def' },
+    { label: 'Cache criado', tokens: totals.cacheCreate, color: '#c8963e' },
+    { label: 'Respostas', tokens: totals.output, color: '#7f9b7a' },
+  ].filter((row) => row.tokens > 0);
+  el<HTMLUListElement>('breakdown').replaceChildren(
+    ...rows.map((row) => breakdownRow(row.label, row.tokens, used ? Math.round((row.tokens / used) * 100) : 0, row.color)),
+    breakdownRow('Espaço livre', Math.max(0, limit - used), 0),
+  );
+}
+
+let lastUsageTotals: UsageTotals = { messages: 0, cacheCreate: 0, output: 0 };
+
+async function refreshContextFromSession(workspace: string, sessionId: string): Promise<void> {
+  try {
+    const session = await bridge.session(workspace, sessionId);
+    lastUsageTotals = sumUsage(session.messages);
+    accumulatedTokens = lastUsageTotals.messages + lastUsageTotals.cacheCreate + lastUsageTotals.output;
+    await updateContext(accumulatedTokens);
+  } catch {
+    // Best-effort: the gauge just keeps its last known value.
+  }
 }
 
 /* ── Events ──────────────────────────────────────────────────── */
@@ -964,8 +1042,7 @@ bridge.onEvent((payload) => {
 
     case 'done': {
       flushAssistantStream();
-      accumulatedTokens += (payload.inputTokens ?? 0) + (payload.outputTokens ?? 0);
-      void updateContext(accumulatedTokens);
+      if (currentWorkspace && currentSessionId) void refreshContextFromSession(currentWorkspace, currentSessionId);
       busy = false;
       setPlaceholder();
       setThinking(false);
@@ -1192,6 +1269,7 @@ function handleChromeAction(action: string): void {
     case 'new':
       thread.replaceChildren();
       accumulatedTokens = 0;
+      lastUsageTotals = { messages: 0, cacheCreate: 0, output: 0 };
       void updateContext(0);
       input.focus();
       return;
