@@ -22,7 +22,6 @@ let mainWindow: BrowserWindow | undefined;
 let context: ToolContext | undefined;
 let registry: ToolRegistry | undefined;
 let abortController: AbortController | undefined;
-let harnessSessionId: string | undefined;
 
 function getHarnessWorkspace(): string {
   return process.env.HARNESS_WORKSPACE ?? app.getPath('home');
@@ -164,7 +163,7 @@ app.on('window-all-closed', () => {
  * so the sandbox and permission gate stay in the main process where the
  * filesystem and shell actually live.
  */
-ipcMain.handle('agent:run', async (_event, prompt: string) => {
+ipcMain.handle('agent:run', async (_event, prompt: string, activeSessionId?: string) => {
   const send = (payload: unknown): void => {
     if (mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send('agent:event', payload);
@@ -175,13 +174,13 @@ ipcMain.handle('agent:run', async (_event, prompt: string) => {
   try {
     if (process.env.REPL_DESKTOP_LOCAL !== '1') {
       const client = getHarnessClient();
-      const sessionId = await client.chat(
+      await client.chat(
         getHarnessWorkspace(),
         prompt,
-        harnessSessionId,
+        activeSessionId,
         (event) => {
           if (event.event === 'session' && typeof event.data.session_id === 'string') {
-            harnessSessionId = event.data.session_id;
+            send({ type: 'session', sessionId: event.data.session_id });
             return;
           }
           if (event.event === 'token' && typeof event.data.text === 'string') {
@@ -200,7 +199,6 @@ ipcMain.handle('agent:run', async (_event, prompt: string) => {
         },
         abortController.signal,
       );
-      harnessSessionId = sessionId ?? harnessSessionId;
       return;
     }
     const result = await runAgent({

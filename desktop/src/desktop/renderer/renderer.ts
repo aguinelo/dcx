@@ -5,21 +5,10 @@
  * and sends prompts back. The only reason this file exists is the DOM.
  */
 
-import {
-  TERMINAL_SESSIONS,
-  type BackgroundTask,
-  type TranscriptItem,
-} from './mock.ts';
-import {
-  type AgentState,
-  SIMULATION,
-  SIM_PROMPT,
-  type SimAgent,
-  type SimEvent,
-} from './simulation.ts';
+import { TERMINAL_SESSIONS, type BackgroundTask } from './mock.ts';
 
 interface AgentEventPayload {
-  type: 'text' | 'progress' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error' | 'run_event';
+  type: 'text' | 'progress' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error' | 'run_event' | 'session';
   id?: string;
   name?: string;
   input?: unknown;
@@ -32,10 +21,11 @@ interface AgentEventPayload {
   outputTokens?: number;
   event?: string;
   data?: Record<string, unknown>;
+  sessionId?: string;
 }
 
 interface ReplBridge {
-  run(prompt: string): Promise<void>;
+  run(prompt: string, sessionId?: string): Promise<void>;
   cancel(): Promise<boolean>;
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
@@ -515,36 +505,6 @@ function stopBackgroundTask(id: string): void {
   renderBackground();
 }
 
-function addBackgroundTask(glyph: string, title: string): void {
-  backgroundTasks.push({
-    id: `sim-${backgroundTasks.length}`,
-    glyph,
-    title,
-    elapsed: 0,
-    running: true,
-  });
-  renderBackground();
-}
-
-/**
- * Close the tasks this run opened — and only those.
- *
- * The seeded Drive retry is independent of the simulated turn: a stage
- * finishing says nothing about whether an unrelated retry loop stopped, so
- * sweeping every running task here would be a lie.
- */
-function completeBackgroundTasks(): void {
-  let closed = 0;
-  for (const task of backgroundTasks) {
-    if (!task.running || !task.id.startsWith('sim-')) continue;
-    task.running = false;
-    closed += 1;
-  }
-  if (closed === 0) return;
-  backgroundCompleted += closed;
-  renderBackground();
-}
-
 /* ── Transcript ──────────────────────────────────────────────── */
 
 function row(cls: string, html: string): HTMLElement {
@@ -698,267 +658,6 @@ function flushAssistantStream(): void {
   scrollToEnd();
 }
 
-/**
- * Tints a command the way the reference does. Runs on escaped text, so the
- * only strings it can emit are these two spans.
- */
-function highlightCommand(escaped: string): string {
-  return escaped
-    .replace(/(^|[\s(])(&quot;[\s\S]*?&quot;)/g, '$1<span class="tok-str">$2</span>')
-    .replace(/^([a-z0-9._/-]+)/i, '<span class="tok-cmd">$1</span>');
-}
-
-function commandNode(item: Extract<TranscriptItem, { kind: 'command' }>): HTMLElement {
-  const node = row(
-    'cmd',
-    [
-      `<div class="cmd__box">`,
-      `<span class="cmd__prompt">&gt;</span>`,
-      `<code class="cmd__code">${highlightCommand(escapeHtml(item.command))}</code>`,
-      `<span class="cmd__actions">`,
-      '<button class="iconbtn iconbtn--tiny" data-cmd-action="run" title="Executar aqui">▷</button>',
-      '<button class="iconbtn iconbtn--tiny" data-cmd-action="copy" title="Copiar">⧉</button>',
-      '</span>',
-      '</div>',
-      item.output
-        ? `<button class="cmd__output" data-cmd-action="output">${escapeHtml(item.output)}<span class="summary__caret">▸</span></button>`
-        : '',
-    ].join(''),
-  );
-  if (item.multiline) node.classList.add('cmd--multiline');
-  return node;
-}
-
-function questionNode(item: Extract<TranscriptItem, { kind: 'question' }>): HTMLElement {
-  const options = item.options
-    .map((option) => {
-      const hint = option.hint
-        ? `<span class="option__hint">${escapeHtml(option.hint)}</span>`
-        : '';
-      return `<button class="option${option.selected ? ' is-selected' : ''}" data-option>${escapeHtml(option.label)}${hint}</button>`;
-    })
-    .join('');
-
-  return row(
-    'question',
-    [
-      `<button class="question__close" title="Dispensar">✕</button>`,
-      `<div class="question__body">${blockMarkup(item.text)}</div>`,
-      `<p class="question__ask">${escapeHtml(item.question)}</p>`,
-      `<div class="question__options">${options}</div>`,
-    ].join(''),
-  );
-}
-
-function stepsNode(item: Extract<TranscriptItem, { kind: 'steps' }>): HTMLElement {
-  const items = item.items
-    .map(
-      (entry) =>
-        `<li class="steps__item steps__item--${entry.state}"><span class="steps__glyph">${entry.state === 'done' ? '✓' : '◌'}</span><span>${escapeHtml(entry.text)}</span></li>`,
-    )
-    .join('');
-  return row('steps', `<ul class="steps__list">${items}</ul>`);
-}
-
-function activityNode(item: Extract<TranscriptItem, { kind: 'activity' }>): HTMLElement {
-  const diff = item.diff ? `<span class="activity__diff">${escapeHtml(item.diff)}</span>` : '';
-  const tokens = item.tokens
-    ? `<span class="activity__detail">${escapeHtml(item.tokens)}</span>`
-    : '';
-  return row(
-    'activity',
-    `<span class="activity__glyph">⋯</span><span>${escapeHtml(item.text)}</span>${diff}${tokens}<span class="summary__caret">▸</span>`,
-  );
-}
-
-function transcriptNode(item: TranscriptItem): HTMLElement {
-  switch (item.kind) {
-    case 'user':
-      return row('msg msg--user', `<div class="msg__body">${escapeHtml(item.text)}</div>`);
-    case 'assistant':
-      return row('msg', `<div class="msg__body">${blockMarkup(item.text)}</div>`);
-    case 'summary':
-      return row('summary', `<span class="summary__caret">▸</span>${escapeHtml(item.text)}`);
-    case 'question':
-      return questionNode(item);
-    case 'command':
-      return commandNode(item);
-    case 'steps':
-      return stepsNode(item);
-    case 'activity':
-      return activityNode(item);
-    case 'pr':
-      return row(
-        'pr',
-        `<span>${escapeHtml(item.text)}</span><span class="pr__ref">#${item.number}</span><span class="summary__caret">▸</span>`,
-      );
-    case 'artifact':
-      return row(
-        'artifact',
-        `<span class="artifact__badge">${escapeHtml(item.badge)}</span><span class="artifact__label">${escapeHtml(item.label)}</span><span class="artifact__meta">${escapeHtml(item.meta)}</span>`,
-      );
-  }
-}
-
-/* ── Orchestrated run ────────────────────────────────────────── */
-
-const AGENT_GLYPH: Record<AgentState, string> = {
-  queued: '○',
-  running: '◌',
-  done: '✓',
-  failed: '✕',
-};
-
-/** Live handles so later events patch the card they belong to. */
-const worktreeNodes = new Map<string, HTMLElement>();
-const stageNodes = new Map<string, HTMLElement>();
-
-/**
- * A stage is announced once and resolved in place. Emitting a second header
- * for the same label would show the same stage twice, which is not what the
- * reference does — there the caret just stops pulsing and turns into a tick.
- * Returns null when the stage was already on screen.
- */
-function stageNode(label: string, state: 'running' | 'done'): HTMLElement | null {
-  const done = state === 'done';
-  const existing = stageNodes.get(label);
-
-  if (done && existing) {
-    existing.className = 'stage stage--done';
-    const glyph = existing.querySelector('.stage__glyph');
-    if (glyph) glyph.textContent = '✓';
-    return null;
-  }
-
-  const node = row(
-    'stage',
-    `<span class="stage__rule"></span><span class="stage__glyph">${done ? '✓' : '◌'}</span><span class="stage__label">${escapeHtml(label)}</span>`,
-  );
-  stageNodes.set(label, node);
-  return node;
-}
-
-/** Each resolved stage costs context, which is what makes the gauge move. */
-function bumpContext(): void {
-  accumulatedTokens += 121_500;
-  void updateContext(accumulatedTokens);
-}
-
-function agentRowMarkup(agent: SimAgent): string {
-  return [
-    `<li class="agent agent--${agent.state}" data-name="${escapeHtml(agent.name)}">`,
-    `<span class="agent__glyph">${AGENT_GLYPH[agent.state]}</span>`,
-    `<span class="agent__name">${escapeHtml(agent.name)}</span>`,
-    `<span class="agent__detail">${escapeHtml(agent.detail)}</span>`,
-    '</li>',
-  ].join('');
-}
-
-function worktreeNode(event: Extract<SimEvent, { kind: 'worktree' }>): HTMLElement {
-  const node = row(
-    'worktree',
-    [
-      '<header class="worktree__head">',
-      '<span class="worktree__glyph">⑂</span>',
-      `<span class="worktree__path">${escapeHtml(event.path)}</span>`,
-      `<span class="worktree__branch">${escapeHtml(event.branch)}</span>`,
-      '</header>',
-      `<ul class="worktree__agents">${event.agents.map(agentRowMarkup).join('')}</ul>`,
-    ].join(''),
-  );
-  worktreeNodes.set(event.path, node);
-  return node;
-}
-
-/** Patch one subagent row in place rather than rebuilding the card. */
-function updateAgent(event: Extract<SimEvent, { kind: 'agent' }>): void {
-  const row = worktreeNodes
-    .get(event.path)
-    ?.querySelector<HTMLElement>(`[data-name="${CSS.escape(event.name)}"]`);
-  if (!row) return;
-
-  row.className = `agent agent--${event.state}`;
-  const glyph = row.querySelector('.agent__glyph');
-  if (glyph) glyph.textContent = AGENT_GLYPH[event.state];
-  const detail = row.querySelector('.agent__detail');
-  if (detail) detail.textContent = event.detail;
-}
-
-function applySimEvent(event: SimEvent): void {
-  switch (event.kind) {
-    case 'assistant':
-      addAssistantMessage(event.text);
-      return;
-    case 'stage': {
-      const node = stageNode(event.label, event.state);
-      if (node) thread.append(node);
-      if (event.state === 'done') {
-        bumpContext();
-        completeBackgroundTasks();
-      }
-      break;
-    }
-    case 'worktree':
-      thread.append(worktreeNode(event));
-      addBackgroundTask('⑂', `${event.branch} · ${event.agents.length} subagentes`);
-      break;
-    case 'agent':
-      updateAgent(event);
-      return;
-    default:
-      thread.append(transcriptNode(event as TranscriptItem));
-  }
-  scrollToEnd();
-}
-
-let simTimer: number | undefined;
-
-function stopSimulation(): void {
-  if (simTimer === undefined) return;
-  window.clearInterval(simTimer);
-  simTimer = undefined;
-}
-
-function finishSimulation(): void {
-  stopSimulation();
-  busy = false;
-  setPlaceholder();
-  el<HTMLButtonElement>('sim-start').hidden = false;
-  el<HTMLButtonElement>('sim-stop').hidden = true;
-}
-
-function runSimulation(): void {
-  if (busy) return;
-  stopSimulation();
-
-  busy = true;
-  setPlaceholder();
-  worktreeNodes.clear();
-  stageNodes.clear();
-  thread.replaceChildren();
-  accumulatedTokens = 0;
-  void updateContext(0);
-  el<HTMLDivElement>('notice').hidden = true;
-  el<HTMLButtonElement>('sim-start').hidden = true;
-  el<HTMLButtonElement>('sim-stop').hidden = false;
-
-  addUserMessage(SIM_PROMPT);
-
-  const started = performance.now();
-  let cursor = 0;
-
-  simTimer = window.setInterval(() => {
-    const elapsed = performance.now() - started;
-    while (cursor < SIMULATION.length) {
-      const next = SIMULATION[cursor];
-      if (!next || next.at > elapsed) break;
-      applySimEvent(next);
-      cursor += 1;
-    }
-    if (cursor >= SIMULATION.length) finishSimulation();
-  }, 80);
-}
-
 function addActivity(id: string, name: string, detail = ''): HTMLElement {
   setThinking(true);
   const lowerName = name.toLowerCase();
@@ -1092,6 +791,16 @@ let accumulatedTokens = 0;
 
 bridge.onEvent((payload) => {
   switch (payload.type) {
+    case 'session': {
+      const isNewSession = currentSessionId !== payload.sessionId;
+      currentSessionId = payload.sessionId;
+      if (isNewSession && currentWorkspace) {
+        el<HTMLButtonElement>('promote-run').hidden = false;
+        void bridge.sessions(currentWorkspace).then(renderSessionLists);
+      }
+      break;
+    }
+
     case 'tool_start':
       flushAssistantStream();
       if (payload.id) addActivity(payload.id, payload.name ?? 'tool', summarize(payload.input));
@@ -1240,7 +949,7 @@ async function submit(): Promise<void> {
   setThinking(true);
 
   try {
-    await bridge.run(prompt);
+    await bridge.run(prompt, currentSessionId);
   } catch (error) {
     showNotice(
       'Falha ao iniciar o turno',
@@ -1264,52 +973,6 @@ input.addEventListener('keydown', (event) => {
 
 /* ── Chrome ──────────────────────────────────────────────────── */
 
-/** Selecting an answer is a single-choice set, so clear the siblings first. */
-function selectOption(chosen: HTMLElement): void {
-  const group = chosen.closest('.question__options');
-  if (!group) return;
-  for (const option of group.querySelectorAll('.option')) {
-    option.classList.toggle('is-selected', option === chosen);
-  }
-}
-
-async function copyCommand(code: HTMLElement): Promise<void> {
-  // navigator.clipboard is unavailable on file:// without a permission grant,
-  // so fall back to a selection the caller can copy by hand.
-  const text = code.textContent ?? '';
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const range = document.createRange();
-    range.selectNodeContents(code);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  }
-}
-
-function handleCommandClick(target: HTMLElement): boolean {
-  const trigger = target.closest<HTMLElement>('[data-cmd-action]');
-  if (!trigger) return false;
-
-  switch (trigger.dataset.cmdAction) {
-    case 'run':
-      renderTerminal('repl');
-      setTerminal(true);
-      return true;
-    case 'copy': {
-      const code = trigger.closest<HTMLElement>('.cmd')?.querySelector<HTMLElement>('.cmd__code');
-      if (code) void copyCommand(code);
-      return true;
-    }
-    case 'output':
-      trigger.classList.toggle('is-open');
-      return true;
-    default:
-      return false;
-  }
-}
-
 function handleChromeAction(action: string): void {
   switch (action) {
     case 'toggle-sidebar':
@@ -1319,6 +982,7 @@ function handleChromeAction(action: string): void {
       layout.dataset.panel = layout.dataset.panel === 'hidden' ? 'shown' : 'hidden';
       return;
     case 'terminal':
+      if (layout.dataset.terminal !== 'open') renderTerminal('repl');
       setTerminal(layout.dataset.terminal !== 'open');
       return;
     case 'toggle-terminal':
@@ -1326,12 +990,6 @@ function handleChromeAction(action: string): void {
       return;
     case 'toggle-bg':
       el('bg-section').classList.toggle('is-collapsed');
-      return;
-    case 'simulate':
-      runSimulation();
-      return;
-    case 'stop-sim':
-      finishSimulation();
       return;
     case 'settings':
       el('theme-settings').hidden = false;
@@ -1351,9 +1009,12 @@ function handleChromeAction(action: string): void {
       return;
     case 'new':
       thread.replaceChildren();
+      currentSessionId = undefined;
       accumulatedTokens = 0;
       lastUsageTotals = { messages: 0, cacheCreate: 0, output: 0 };
       void updateContext(0);
+      el<HTMLButtonElement>('promote-run').hidden = true;
+      document.querySelectorAll('[data-session-id].is-active').forEach((node) => node.classList.remove('is-active'));
       input.focus();
       return;
     default:
@@ -1410,12 +1071,6 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  const option = target.closest<HTMLElement>('[data-option]');
-  if (option) {
-    selectOption(option);
-    return;
-  }
-
   const swatch = target.closest<HTMLElement>('.theme');
   if (swatch?.dataset.theme) {
     applyTheme(swatch.dataset.theme);
@@ -1429,8 +1084,6 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  if (handleCommandClick(target)) return;
-
   const action = target.closest('[data-action]')?.getAttribute('data-action');
   if (action) handleChromeAction(action);
 });
@@ -1438,6 +1091,7 @@ document.addEventListener('click', (event) => {
 async function loadHarnessData(): Promise<void> {
   try {
     const workspace = await bridge.workspace();
+    currentWorkspace = workspace;
     renderStaticRegions(workspace);
     const connection = el('connection-state');
     connection.textContent = 'Harness conectado';
