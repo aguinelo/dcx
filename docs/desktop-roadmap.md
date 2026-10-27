@@ -12,7 +12,7 @@ de conversa e execução.
 | 2. Dados reais de trabalho | Concluída | Alterações mostra PRs reais via `gh`; tarefas em segundo plano acompanham runs do Harness e podem ser canceladas. |
 | 3. Troca de workspace | Concluída | Itens locais em Workspaces são selecionáveis; o seletor nativo adiciona qualquer pasta; histórico, configurações e conversas usam o projeto escolhido; workspaces recentes persistem entre aberturas. |
 | 4. Ferramentas da interface | Concluída | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON, busca local, rotinas com agendamento recorrente de 1 h a 7 dias e retomada de runs após reinício do daemon. |
-| 5. Distribuição | Em andamento | Empacotamento macOS reproduzível em DMG, CLI Harness incluído e daemon local iniciado automaticamente quando necessário. Assinatura, notarização, ícone próprio e atualização automática ficam para a etapa seguinte. |
+| 5. Distribuição | Em andamento | Empacotamento macOS reproduzível em DMG, CLI Harness incluído, ícone próprio e daemon local iniciado automaticamente. Assinatura/notarização condicionais estão implementadas; credenciais Apple e canal de atualização automática ainda são pendências externas. |
 
 ## Critérios de conclusão
 
@@ -26,6 +26,7 @@ de conversa e execução.
 - Agendamentos ficam desativados por padrão, exigem confirmação, executam em modo somente leitura e registram status e custo conhecido.
 - Runs em andamento são retomados após o reinício do daemon; se o contrato ainda não foi aprovado, o fluxo recomeça e pede aprovação novamente.
 - O DMG de desenvolvimento inclui o CLI do Harness; o app inicia o daemon local quando o endpoint padrão está indisponível e não assume controle de endpoints customizados.
+- O app usa ícone próprio; sem credenciais Apple o build continua reproduzível com assinatura ad-hoc, e com identidade Developer ID + credenciais o hook notariza e aplica o ticket.
 - A interface não apresenta dados simulados como se fossem dados reais.
 - `cd desktop && npm run typecheck && npm run build` passa antes de cada entrega.
 
@@ -62,4 +63,4 @@ Para validar **Rotinas**, crie uma instrução, salve, selecione-a novamente e c
 
 Para validar **Agendamento**, selecione uma frequência e confirme o aviso de custo. A primeira execução ocorre após o intervalo escolhido; a lista exibe a próxima execução e, após disparar, o status e o custo conhecido. O daemon precisa permanecer aberto; ao voltar depois de uma pausa, ele executa uma vez a ocorrência vencida e ignora os ciclos intermediários.
 
-Para gerar a build macOS, rode `cd desktop && pnpm package:mac`. O DMG sem assinatura aparece em `desktop/release/`; para distribuir externamente, ainda é necessário assinar e notarizar com uma identidade Apple Developer ID.
+Para gerar a build macOS, rode `cd desktop && pnpm package:mac`. O DMG aparece em `desktop/release/` com o ícone próprio. Sem identidade Developer ID ele sai com assinatura ad-hoc; para distribuir externamente, configure a identidade e as credenciais de notarização descritas no `desktop/README.md`. A atualização automática continua pendente de um canal de releases.

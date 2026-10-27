@@ -81,15 +81,36 @@ pnpm package:mac
 ```
 
 O comando compila o CLI Rust em modo release, compila a interface e cria um
-DMG sem assinatura em `release/`. O `.app` inclui o executável `harness` e
-inicia o daemon local ao abrir, caso `http://127.0.0.1:8787` ainda não esteja
-respondendo. Se já houver um daemon nesse endereço, o desktop o reutiliza.
+DMG em `release/`. O `.app` inclui o executável `harness`, usa o ícone próprio
+de `build/icon.icns` e inicia o daemon local ao abrir, caso
+`http://127.0.0.1:8787` ainda não esteja respondendo. Se já houver um daemon
+nesse endereço, o desktop o reutiliza.
 
 Para usar outro daemon, defina `HARNESS_URL`; endpoints customizados não são
 iniciados nem encerrados pelo app. `HARNESS_BIN` escolhe explicitamente o CLI,
-e `HARNESS_MANAGE_DAEMON=0` desativa o gerenciamento automático. O DMG de
-desenvolvimento não é assinado nem notarizado pela Apple; para distribuir fora
-da máquina de build, configure identidade de Developer ID e notarização.
+e `HARNESS_MANAGE_DAEMON=0` desativa o gerenciamento automático.
+
+Sem uma identidade Developer ID no keychain, o app sai com assinatura ad-hoc e
+a notarização é ignorada; esse DMG serve para uso local. Para distribuir fora
+da máquina de build, instale a identidade de Developer ID e defina uma das
+formas de credencial da Apple:
+
+```bash
+# Perfil salvo pelo notarytool
+APPLE_KEYCHAIN_PROFILE=harness-notary pnpm package:mac
+
+# Ou credenciais explícitas
+APPLE_ID=voce@exemplo.com \
+APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx \
+APPLE_TEAM_ID=XXXXXXXXXX \
+pnpm package:mac
+```
+
+O hook `tools/notarize.mjs` envia o app assinado ao `notarytool`, aplica o
+ticket com `stapler` e falha o build se a notarização falhar. Use
+`HARNESS_SKIP_NOTARIZE=1` para pular a notarização mesmo com credenciais
+configuradas. O ícone tem como fonte `build/icon.svg` e uma versão 1024 px em
+`build/icon.png`; `build/icon.icns` é o arquivo usado no bundle.
 
 ## O gate
 

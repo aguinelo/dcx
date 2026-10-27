@@ -45,10 +45,13 @@
         "to": "bin/harness"
       }
     ],
+    "afterSign": "tools/notarize.mjs",
     "mac": {
       "target": ["dmg"],
       "category": "public.app-category.developer-tools",
-      "identity": null
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     },
     "dmg": {
       "artifactName": "Harness-${version}-${arch}.${ext}"
