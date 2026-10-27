@@ -206,13 +206,14 @@ export class HarnessClient {
     workspace: string,
     message: string,
     sessionId: string | undefined,
+    contextWorkspaces: string[],
     onEvent: (event: HarnessEvent) => void,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     const response = await this.fetchImpl(`${this.baseUrl}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workspace, message, ...(sessionId ? { session_id: sessionId } : {}) }),
+      body: JSON.stringify({ workspace, message, context_workspaces: contextWorkspaces, ...(sessionId ? { session_id: sessionId } : {}) }),
       ...(signal ? { signal } : {}),
     });
     if (!response.ok || !response.body) {

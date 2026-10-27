@@ -14,7 +14,7 @@ ipcRenderer.on('agent:event', (_event, payload) => handler(payload));
 
 contextBridge.exposeInMainWorld('repl', {
   /** Start a turn. Resolves when the turn ends, however it ends. */
-  run: (prompt, workspace, sessionId) => ipcRenderer.invoke('agent:run', prompt, workspace, sessionId),
+  run: (prompt, workspace, sessionId, contextWorkspaces) => ipcRenderer.invoke('agent:run', prompt, workspace, sessionId, contextWorkspaces),
 
   /** Abort the turn in flight. */
   cancel: () => ipcRenderer.invoke('agent:cancel'),
@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('repl', {
   gitBranch: (workspace) => ipcRenderer.invoke('harness:gitBranch', workspace),
   githubRepos: () => ipcRenderer.invoke('harness:githubRepos'),
   githubPrs: () => ipcRenderer.invoke('harness:githubPrs'),
+  addContextRepo: (workspace) => ipcRenderer.invoke('harness:addContextRepo', workspace),
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
   promote: (workspace, sessionId) => ipcRenderer.invoke('harness:promote', workspace, sessionId),

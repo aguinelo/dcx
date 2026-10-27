@@ -177,7 +177,7 @@ fn chat_streams_and_persists_a_read_only_session() {
             .any(|line| line == "--allowedTools=Read,Glob,Grep")
     );
     assert!(args.lines().any(|line| line
-        == "--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch"));
+        == "--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch,Agent"));
     assert!(!args.contains("acceptEdits"));
     assert!(args.contains("modo conversa read-only"));
 }

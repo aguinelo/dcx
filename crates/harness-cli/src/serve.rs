@@ -13,6 +13,8 @@ struct ChatRequest {
     workspace: String,
     session_id: Option<String>,
     message: String,
+    #[serde(default)]
+    context_workspaces: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -700,10 +702,11 @@ fn handle_chat(stream: &mut TcpStream, body: &str) -> Result<(), String> {
             );
         }
     };
-    let result = chat::send_message_with_events(
+    let result = chat::send_message_with_context(
         &workspace,
         &mut session,
         &request.message,
+        &request.context_workspaces,
         &mut stream_event,
     );
     match result {

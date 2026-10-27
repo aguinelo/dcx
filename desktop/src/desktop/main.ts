@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, Menu, app, ipcMain, shell } from 'electron';
+import { BrowserWindow, Menu, app, dialog, ipcMain, shell } from 'electron';
 import { runAgent } from '../agent/loop.ts';
 import { PermissionGate } from '../agent/permissions.ts';
 import { createAnthropicProvider } from '../provider/anthropic.ts';
@@ -163,7 +164,7 @@ app.on('window-all-closed', () => {
  * so the sandbox and permission gate stay in the main process where the
  * filesystem and shell actually live.
  */
-ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | undefined, activeSessionId?: string) => {
+ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | undefined, activeSessionId?: string, contextWorkspaces: string[] = []) => {
   const send = (payload: unknown): void => {
     if (mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send('agent:event', payload);
@@ -178,6 +179,7 @@ ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | u
         workspace || getHarnessWorkspace(),
         prompt,
         activeSessionId,
+        contextWorkspaces,
         (event) => {
           if (event.event === 'session' && typeof event.data.session_id === 'string') {
             send({ type: 'session', sessionId: event.data.session_id });
@@ -222,6 +224,45 @@ ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | u
   } finally {
     abortController = undefined;
   }
+});
+
+ipcMain.handle('harness:addContextRepo', async (_event, workspace: string) => {
+  const picker = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Adicionar repositório ao contexto',
+    buttonLabel: 'Selecionar repositório',
+    properties: ['openDirectory'],
+  });
+  if (picker.canceled || !picker.filePaths[0]) return undefined;
+
+  const selected = picker.filePaths[0];
+  const gitRoot = (directory: string): Promise<string> => new Promise((resolve, reject) => {
+    execFile('git', ['-C', directory, 'rev-parse', '--show-toplevel'], { timeout: 5_000 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(stderr.trim() || 'A pasta selecionada não é um repositório Git.'));
+      else resolve(stdout.trim());
+    });
+  });
+  const selectedRealPath = await realpath(selected);
+  const canonical = await realpath(await gitRoot(selectedRealPath));
+  const primary = await realpath(workspace);
+  if (canonical === primary) throw new Error('Esse repositório já é o workspace principal.');
+
+  let provider = 'modelo configurado';
+  try {
+    provider = (await getHarnessClient().config(workspace)).provider;
+  } catch {
+    // Permission copy stays accurate even while the daemon is unavailable.
+  }
+  const answer = await dialog.showMessageBox(mainWindow!, {
+    type: 'warning',
+    title: 'Autorizar acesso ao repositório?',
+    message: `Permitir que o Harness leia ${path.basename(canonical)}?`,
+    detail: `Arquivos desse repositório poderão ser incluídos no contexto e enviados ao provider ${provider} durante as conversas deste workspace. Você pode remover o acesso pela barra lateral a qualquer momento.`,
+    buttons: ['Cancelar', 'Permitir acesso'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  return answer.response === 1 ? canonical : undefined;
 });
 
 ipcMain.handle('agent:cancel', () => {

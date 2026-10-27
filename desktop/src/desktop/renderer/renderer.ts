@@ -26,7 +26,7 @@ interface AgentEventPayload {
 }
 
 interface ReplBridge {
-  run(prompt: string, workspace: string, sessionId?: string): Promise<void>;
+  run(prompt: string, workspace: string, sessionId: string | undefined, contextWorkspaces: string[]): Promise<void>;
   cancel(): Promise<boolean>;
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
@@ -65,6 +65,7 @@ interface ReplBridge {
   githubPrs(): Promise<{
     prs: Array<{ title: string; repo: string; number: number; url: string; additions: number; deletions: number; files: number; ready: boolean }>;
   }>;
+  addContextRepo(workspace: string): Promise<string | undefined>;
   authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
   authLogout(): Promise<{ loggedIn: boolean }>;
 }
@@ -96,6 +97,101 @@ let thinkingBody: HTMLElement | undefined;
 let thoughtCount = 0;
 let commandCount = 0;
 let editCount = 0;
+let currentProjects: Array<{ path: string }> = [];
+
+const CONTEXT_REPOS_KEY = 'harness.contextRepos';
+
+function contextRepos(): Record<string, string[]> {
+  try {
+    const value = JSON.parse(localStorage.getItem(CONTEXT_REPOS_KEY) ?? '{}') as unknown;
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, string[]>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function reposForWorkspace(workspace = currentWorkspace): string[] {
+  return (contextRepos()[workspace] ?? []).filter((repo) => typeof repo === 'string');
+}
+
+function saveRepos(workspace: string, repos: string[]): void {
+  const all = contextRepos();
+  all[workspace] = repos;
+  localStorage.setItem(CONTEXT_REPOS_KEY, JSON.stringify(all));
+}
+
+function renderContextRepos(): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'group context-repos';
+  const title = document.createElement('h2');
+  title.className = 'group__title';
+  const label = document.createElement('span');
+  label.textContent = 'Repositórios no contexto';
+  const add = document.createElement('button');
+  add.className = 'group__add';
+  add.textContent = '+';
+  add.dataset.action = 'add-context-repo';
+  add.title = 'Adicionar repositório externo com confirmação';
+  add.setAttribute('aria-label', add.title);
+  title.append(label, add);
+
+  const list = document.createElement('ul');
+  list.className = 'conversations';
+  for (const repo of reposForWorkspace()) {
+    const item = document.createElement('li');
+    item.className = 'context-repo';
+    const name = document.createElement('span');
+    name.className = 'title';
+    name.textContent = repo.replace(/\/+$/, '').split('/').pop() || repo;
+    name.title = repo;
+    const remove = document.createElement('button');
+    remove.className = 'context-repo__remove';
+    remove.dataset.action = 'remove-context-repo';
+    remove.dataset.repoPath = repo;
+    remove.title = 'Remover acesso';
+    remove.setAttribute('aria-label', `Remover acesso a ${name.textContent}`);
+    remove.textContent = '×';
+    item.append(name, remove);
+    list.append(item);
+  }
+  if (list.childElementCount === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'context-repo__empty';
+    empty.textContent = 'Nenhum repositório compartilhado';
+    list.append(empty);
+  }
+  section.append(title, list);
+  return section;
+}
+
+async function addContextRepo(): Promise<void> {
+  try {
+    const selected = await bridge.addContextRepo(currentWorkspace);
+    if (!selected) return;
+    const repos = reposForWorkspace();
+    if (!repos.includes(selected)) saveRepos(currentWorkspace, [...repos, selected]);
+    renderWorkspaceGroups(currentProjects);
+    showNotice('Acesso concedido', `${selected} poderá ser consultado nas próximas mensagens deste workspace.`, false);
+  } catch (error) {
+    showNotice('Não foi possível adicionar o repositório', error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
+  el('groups').replaceChildren(
+    projectSection({
+      name: 'Workspaces',
+      items: projects.map((project) => ({
+        title: project.path.replace(/\/+$/, '').split('/').pop() || project.path,
+        workspacePath: project.path,
+        active: project.path === currentWorkspace,
+      })),
+    }),
+    renderContextRepos(),
+  );
+}
 
 /* ── Sidebar and panel content ────────────────────────────────── */
 
@@ -936,7 +1032,7 @@ bridge.onEvent((payload) => {
 
     case 'error':
       flushAssistantStream();
-      showNotice('Falha ao falar com o modelo', payload.message ?? 'erro desconhecido', true);
+      showNotice('Turno interrompido', payload.message ?? 'erro desconhecido', true);
       busy = false;
       setPlaceholder();
       setThinking(false);
@@ -1045,7 +1141,7 @@ async function submit(): Promise<void> {
   setThinking(true);
 
   try {
-    await bridge.run(prompt, currentWorkspace, currentSessionId);
+    await bridge.run(prompt, currentWorkspace, currentSessionId, reposForWorkspace());
   } catch (error) {
     showNotice(
       'Falha ao iniciar o turno',
@@ -1138,6 +1234,23 @@ document.addEventListener('change', (event) => {
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
 
+  const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'add-context-repo') {
+    event.stopPropagation();
+    void addContextRepo();
+    return;
+  }
+  if (action === 'remove-context-repo') {
+    event.stopPropagation();
+    const repo = target.closest<HTMLElement>('[data-action="remove-context-repo"]')?.dataset.repoPath;
+    if (repo) {
+      saveRepos(currentWorkspace, reposForWorkspace().filter((entry) => entry !== repo));
+      renderWorkspaceGroups(currentProjects);
+      showNotice('Acesso removido', `${repo} não será incluído nas próximas mensagens.`, false);
+    }
+    return;
+  }
+
   const workspaceNode = target.closest<HTMLElement>('[data-workspace-path]');
   if (workspaceNode?.dataset.workspacePath) {
     void switchWorkspace(workspaceNode.dataset.workspacePath);
@@ -1186,7 +1299,6 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  const action = target.closest('[data-action]')?.getAttribute('data-action');
   if (action) handleChromeAction(action);
 });
 
@@ -1208,17 +1320,8 @@ async function loadHarnessData(workspaceOverride?: string): Promise<void> {
     if (sessions[0]) await loadSession(workspace, sessions[0].session_id);
     renderSessionLists(sessions);
     const parent = workspace.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/';
-    const projects = await bridge.projects(parent);
-    el('groups').replaceChildren(
-      projectSection({
-        name: 'Workspaces',
-        items: projects.map((project) => ({
-          title: project.path.replace(/\/+$/, '').split('/').pop() || project.path,
-          workspacePath: project.path,
-          active: project.path === workspace,
-        })),
-      }),
-    );
+    currentProjects = await bridge.projects(parent);
+    renderWorkspaceGroups(currentProjects);
     el('project-chip').firstChild!.textContent = workspace.replace(/\/+$/, '').split('/').pop() || workspace;
   } catch (error) {
     el('connection-state').textContent = 'Harness offline';

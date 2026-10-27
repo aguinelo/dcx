@@ -158,7 +158,7 @@ impl ClaudeChatProvider {
             max_tool_calls: crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
                 .and_then(|value| value.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
-                .unwrap_or(8),
+                .unwrap_or(16),
         })
     }
 
@@ -200,7 +200,7 @@ pub fn config(workspace: &Path) -> ChatConfig {
     let max_tool_calls = crate::env_file::value(workspace, "HARNESS_CHAT_MAX_TOOL_CALLS")
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(8);
+        .unwrap_or(16);
     ChatConfig {
         provider: backend.provider_name().to_owned(),
         model: resolve_model(workspace, backend, None, true),
@@ -249,6 +249,18 @@ impl ChatProvider for ClaudeChatProvider {
         prompt: &str,
         on_event: &mut dyn FnMut(ChatEvent),
     ) -> Result<ChatReply, String> {
+        self.send_with_context(workspace, prompt, &[], on_event)
+    }
+}
+
+impl ClaudeChatProvider {
+    fn send_with_context(
+        &mut self,
+        workspace: &Path,
+        prompt: &str,
+        context_workspaces: &[PathBuf],
+        on_event: &mut dyn FnMut(ChatEvent),
+    ) -> Result<ChatReply, String> {
         let mut command = Command::new(&self.binary);
         command
             .current_dir(workspace)
@@ -263,9 +275,13 @@ impl ChatProvider for ClaudeChatProvider {
                 "plan",
             ])
             .arg("--allowedTools=Read,Glob,Grep")
-            .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch")
+            .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch,Agent")
             .arg("--append-system-prompt")
-            .arg(system_prompt(workspace, self.web_enabled))
+            .arg(system_prompt(workspace, self.web_enabled, context_workspaces));
+        for context_workspace in context_workspaces {
+            command.arg("--add-dir").arg(context_workspace);
+        }
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -478,12 +494,12 @@ impl ChatProvider for ClaudeChatProvider {
     }
 }
 
-fn system_prompt(workspace: &Path, web_enabled: bool) -> String {
-    format!(
+fn system_prompt(workspace: &Path, web_enabled: bool, context_workspaces: &[PathBuf]) -> String {
+    let mut prompt = format!(
         "Você é o Harness em modo conversa read-only.\n\
          Projeto atual: {}.\n\
          É obrigatório responder em português do Brasil (pt-BR), mesmo que o histórico, os arquivos ou a pergunta estejam em outro idioma. Não responda em inglês, salvo quando o usuário pedir explicitamente.\n\
-         Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. {} Nunca edite, crie, apague ou execute comandos; não use Bash. Não altere o projeto.\n\
+         Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. {} Nunca edite, crie, apague ou execute comandos; não use Bash ou subagentes. Não altere o projeto. Faça buscas direcionadas, não repita uma busca que não encontrou resultados e leia apenas os arquivos necessários para responder.\n\
          Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir implementação, explique que isso exige iniciar um run com contrato e sensores; não escreva arquivos.\n\
          Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
         workspace.display(),
@@ -492,7 +508,19 @@ fn system_prompt(workspace: &Path, web_enabled: bool) -> String {
         } else {
             "A pesquisa externa está desabilitada nesta sessão; não alegue ter pesquisado e não invente dados atuais."
         }
-    )
+    );
+    if !context_workspaces.is_empty() {
+        prompt.push_str("\nRepositórios adicionais autorizados para leitura: ");
+        prompt.push_str(
+            &context_workspaces
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        prompt.push_str(". Consulte-os somente quando forem relevantes.");
+    }
+    prompt
 }
 
 fn delta_text(value: &Value) -> Option<&str> {
@@ -866,9 +894,20 @@ pub fn send_message_with_events(
     message: &str,
     on_event: &mut dyn FnMut(ChatEvent),
 ) -> Result<ChatReply, String> {
+    send_message_with_context(workspace, session, message, &[], on_event)
+}
+
+pub fn send_message_with_context(
+    workspace: &Path,
+    session: &mut ChatSession,
+    message: &str,
+    context_workspaces: &[String],
+    on_event: &mut dyn FnMut(ChatEvent),
+) -> Result<ChatReply, String> {
     if message.trim().is_empty() {
         return Err("mensagem vazia".to_owned());
     }
+    let context_workspaces = validate_context_workspaces(workspace, context_workspaces)?;
     session.messages.push(ChatMessage {
         role: "user".to_owned(),
         content: message.to_owned(),
@@ -885,6 +924,15 @@ pub fn send_message_with_events(
     session.model = provider.model().map(str::to_owned);
     save_session(workspace, session)?;
     let mut prompt = build_prompt(&session.messages);
+    if !context_workspaces.is_empty() {
+        prompt.push_str("\n\n[REPOSITÓRIOS ADICIONAIS AUTORIZADOS]\n");
+        for repo in &context_workspaces {
+            prompt.push_str("- ");
+            prompt.push_str(&repo.display().to_string());
+            prompt.push('\n');
+        }
+        prompt.push_str("Consulte esses repositórios quando forem relevantes para a pergunta.\n[FIM DOS REPOSITÓRIOS AUTORIZADOS]\n");
+    }
     if crate::env_file::value(workspace, "HARNESS_CHAT_WEB")
         .map(|value| {
             matches!(
@@ -905,7 +953,7 @@ pub fn send_message_with_events(
         prompt
             .push_str("\n[FIM DO CONTEXTO WEB]\nUse as fontes acima e cite as URLs na resposta.\n");
     }
-    let reply = provider.send(workspace, &prompt, on_event)?;
+    let reply = provider.send_with_context(workspace, &prompt, &context_workspaces, on_event)?;
     session.messages.push(ChatMessage {
         role: "assistant".to_owned(),
         content: reply.text.clone(),
@@ -919,6 +967,53 @@ pub fn send_message_with_events(
     });
     save_session(workspace, session)?;
     Ok(reply)
+}
+
+fn validate_context_workspaces(
+    workspace: &Path,
+    requested: &[String],
+) -> Result<Vec<PathBuf>, String> {
+    if requested.len() > 8 {
+        return Err("no máximo 8 repositórios adicionais podem entrar no contexto".to_owned());
+    }
+    let primary = fs::canonicalize(workspace)
+        .map_err(|error| format!("workspace principal inválido: {error}"))?;
+    let mut approved = Vec::new();
+    for raw in requested {
+        let selected = fs::canonicalize(raw)
+            .map_err(|error| format!("repositório de contexto indisponível: {error}"))?;
+        if selected == primary || approved.contains(&selected) {
+            continue;
+        }
+        if !selected.is_dir() {
+            return Err(format!(
+                "repositório de contexto não é uma pasta: {}",
+                selected.display()
+            ));
+        }
+        let output = Command::new("git")
+            .args([
+                "-C",
+                selected.to_string_lossy().as_ref(),
+                "rev-parse",
+                "--show-toplevel",
+            ])
+            .output()
+            .map_err(|error| format!("não foi possível validar repositório Git: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "pasta autorizada não é um repositório Git: {}",
+                selected.display()
+            ));
+        }
+        let root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        let root = fs::canonicalize(root).map_err(|error| format!("raiz Git inválida: {error}"))?;
+        if root == primary || approved.contains(&root) {
+            continue;
+        }
+        approved.push(root);
+    }
+    Ok(approved)
 }
 
 fn resolve_workspace(workspace_arg: Option<PathBuf>) -> Result<PathBuf, String> {
@@ -1121,6 +1216,42 @@ mod tests {
         assert!(validate_session_id("a/b").is_err());
         assert!(validate_session_id(".").is_err());
         assert!(validate_session_id("chat-123").is_ok());
+    }
+
+    #[test]
+    fn context_workspaces_must_be_external_git_repositories() {
+        let root = std::env::temp_dir().join(format!("harness-context-{}", new_session_id()));
+        let primary = root.join("primary");
+        let external = root.join("external");
+        fs::create_dir_all(&primary).expect("workspace principal");
+        fs::create_dir_all(&external).expect("repo externo");
+        let status = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&external)
+            .status()
+            .expect("git init");
+        assert!(status.success());
+
+        let granted =
+            validate_context_workspaces(&primary, &[external.to_string_lossy().into_owned()])
+                .expect("repo externo autorizado");
+        assert_eq!(
+            granted,
+            vec![fs::canonicalize(&external).expect("caminho real")]
+        );
+
+        let primary_grant =
+            validate_context_workspaces(&primary, &[primary.to_string_lossy().into_owned()])
+                .expect("workspace principal ignorado");
+        assert!(primary_grant.is_empty());
+
+        let non_repo = root.join("non-repo");
+        fs::create_dir_all(&non_repo).expect("pasta sem git");
+        assert!(
+            validate_context_workspaces(&primary, &[non_repo.to_string_lossy().into_owned()])
+                .is_err()
+        );
+        fs::remove_dir_all(root).expect("limpar teste");
     }
 
     #[test]
