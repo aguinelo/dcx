@@ -37,7 +37,7 @@
         <nav class="sidebar__nav">
           <button class="navitem navitem--strong" data-action="new"><span class="glyph">+</span><span>Criar</span></button>
           <button class="navitem"><span class="glyph">⌕</span><span>Procurar</span></button>
-          <button class="navitem"><span class="glyph">▧</span><span>Artefatos</span></button>
+          <button class="navitem" data-action="artifacts"><span class="glyph">▧</span><span>Artefatos</span></button>
           <button class="navitem"><span class="glyph">◴</span><span>Rotinas</span></button>
           <button class="navitem"><span class="glyph">◑</span><span>Personalização</span></button>
           <button class="navitem"><span class="glyph">⋯</span><span>Mais</span></button>
@@ -72,6 +72,22 @@
 
       <!-- ── Chat ────────────────────────────────────────────────── -->
       <main class="chat">
+        <section class="artifacts-view" id="artifacts-view" hidden aria-label="Artefatos do Harness">
+          <header class="artifacts-view__head">
+            <div><h1>Artefatos</h1><p>Relatórios gerados pelos runs deste workspace.</p></div>
+            <div class="artifacts-view__actions">
+              <button class="btn" data-action="refresh-artifacts">Atualizar</button>
+              <button class="iconbtn" data-action="close-artifacts" title="Voltar à conversa">✕</button>
+            </div>
+          </header>
+          <div class="artifacts-view__content">
+            <aside class="artifacts-view__runs"><ul id="artifact-runs"></ul></aside>
+            <section class="artifacts-view__detail">
+              <div class="artifacts-view__files"><h2 id="artifact-run-title">Selecione um run</h2><ul id="artifact-files"></ul></div>
+              <pre class="artifacts-view__preview" id="artifact-preview">Selecione um arquivo JSON para visualizar seu conteúdo.</pre>
+            </section>
+          </div>
+        </section>
         <div class="chat__scroll" id="thread">
           <div class="thread" id="thread-inner"></div>
         </div>

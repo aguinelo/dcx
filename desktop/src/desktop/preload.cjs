@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('repl', {
   gitBranch: (workspace) => ipcRenderer.invoke('harness:gitBranch', workspace),
   githubRepos: () => ipcRenderer.invoke('harness:githubRepos'),
   githubPrs: () => ipcRenderer.invoke('harness:githubPrs'),
+  runCatalog: (workspace) => ipcRenderer.invoke('harness:runCatalog', workspace),
+  artifact: (workspace, runId, name) => ipcRenderer.invoke('harness:artifact', workspace, runId, name),
   addContextRepo: (workspace) => ipcRenderer.invoke('harness:addContextRepo', workspace),
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authLogout: () => ipcRenderer.invoke('auth:logout'),

@@ -11,7 +11,7 @@ de conversa e execução.
 | 1. Sessões confiáveis | Concluída | Criar uma conversa nova não reutiliza a sessão anterior; removido o fluxo de simulação que confundia o estado real. |
 | 2. Dados reais de trabalho | Concluída | Alterações mostra PRs reais via `gh`; tarefas em segundo plano acompanham runs do Harness e podem ser canceladas. |
 | 3. Troca de workspace | Concluída | Itens locais em Workspaces são selecionáveis; histórico, configurações e conversas passam a usar o projeto escolhido; seleção persiste entre aberturas. |
-| 4. Ferramentas da interface | Em andamento | Terminal executa comandos reais no workspace selecionado com confirmação por comando, timeout e saída limitada. Ainda faltam Artefatos, Rotinas e Procurar. |
+| 4. Ferramentas da interface | Em andamento | Terminal real com confirmação por comando e catálogo/visualizador de artefatos JSON dos runs. Ainda faltam Rotinas e Procurar. |
 | 5. Distribuição | Depois | Empacotar como aplicativo macOS instalável, com ícone, configuração do daemon e atualização/build reproduzível. |
 
 ## Critérios de conclusão

@@ -54,6 +54,8 @@ interface ReplBridge {
   approve(workspace: string, sessionId: string): Promise<unknown>;
   start(workspace: string, sessionId: string): Promise<{ run_id: string; status: string }>;
   cancelRun(workspace: string, runId: string): Promise<void>;
+  runCatalog(workspace: string): Promise<{ runs: Array<{ run_id: string; title: string; summary: string; status: string; criteria_passed: number | null; criteria_total: number | null; states: string[]; files: string[] }> }>;
+  artifact(workspace: string, runId: string, name: string): Promise<{ name: string; content: string }>;
   config(workspace: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   setConfig(
     workspace: string,
@@ -101,6 +103,7 @@ let commandCount = 0;
 let editCount = 0;
 let currentProjects: Array<{ path: string }> = [];
 let terminalWorkspaceDisplayed = '';
+let selectedArtifactRun: string | undefined;
 
 const CONTEXT_REPOS_KEY = 'harness.contextRepos';
 
@@ -194,6 +197,103 @@ function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
       })),
     }),
   );
+}
+
+async function openArtifacts(): Promise<void> {
+  el<HTMLElement>('artifacts-view').hidden = false;
+  await loadArtifactCatalog();
+}
+
+async function loadArtifactCatalog(): Promise<void> {
+  const list = el<HTMLUListElement>('artifact-runs');
+  list.replaceChildren();
+  el('artifact-files').replaceChildren();
+  el('artifact-preview').textContent = 'Selecione um arquivo JSON para visualizar seu conteúdo.';
+  try {
+    const { runs } = await bridge.runCatalog(currentWorkspace);
+    if (runs.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'artifacts-view__empty';
+      empty.textContent = 'Este workspace ainda não tem runs do Harness.';
+      list.append(empty);
+      el('artifact-run-title').textContent = 'Nenhum run encontrado';
+      selectedArtifactRun = undefined;
+      return;
+    }
+    for (const run of runs) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.className = `artifact-run${run.run_id === selectedArtifactRun ? ' is-active' : ''}`;
+      button.dataset.action = 'select-artifact-run';
+      button.dataset.runId = run.run_id;
+      const title = document.createElement('span');
+      title.className = 'artifact-run__title';
+      title.textContent = run.title || run.run_id;
+      const meta = document.createElement('span');
+      meta.className = 'artifact-run__meta';
+      const criteria = run.criteria_passed !== null && run.criteria_total !== null
+        ? ` · ${run.criteria_passed}/${run.criteria_total} critérios`
+        : '';
+      meta.textContent = `${run.status} · ${run.files.length} arquivos${criteria}`;
+      button.append(title, meta);
+      item.append(button);
+      list.append(item);
+    }
+    const active = runs.find((run) => run.run_id === selectedArtifactRun) ?? runs[0]!;
+    await selectArtifactRun(active.run_id, active.title, active.files);
+  } catch (error) {
+    const empty = document.createElement('li');
+    empty.className = 'artifacts-view__empty';
+    empty.textContent = error instanceof Error ? error.message : String(error);
+    list.append(empty);
+  }
+}
+
+async function selectArtifactRun(runId: string, title: string, files?: string[]): Promise<void> {
+  selectedArtifactRun = runId;
+  document.querySelectorAll<HTMLElement>('.artifact-run').forEach((node) => {
+    node.classList.toggle('is-active', node.dataset.runId === runId);
+  });
+  el('artifact-run-title').textContent = title || runId;
+  el('artifact-preview').textContent = 'Selecione um arquivo JSON para visualizar seu conteúdo.';
+  const names = files ?? (await bridge.runCatalog(currentWorkspace)).runs.find((run) => run.run_id === runId)?.files ?? [];
+  const list = el<HTMLUListElement>('artifact-files');
+  list.replaceChildren();
+  for (const name of names) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.className = 'artifact-file';
+    button.dataset.action = 'open-artifact-file';
+    button.dataset.runId = runId;
+    button.dataset.artifactName = name;
+    button.textContent = name;
+    item.append(button);
+    list.append(item);
+  }
+  if (names.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'artifacts-view__empty';
+    empty.textContent = 'Este run ainda não gerou arquivos JSON.';
+    list.append(empty);
+  }
+}
+
+async function openArtifactFile(runId: string, name: string): Promise<void> {
+  const preview = el<HTMLElement>('artifact-preview');
+  preview.textContent = 'Carregando artefato…';
+  try {
+    const artifact = await bridge.artifact(currentWorkspace, runId, name);
+    try {
+      preview.textContent = JSON.stringify(JSON.parse(artifact.content), null, 2);
+    } catch {
+      preview.textContent = artifact.content;
+    }
+    document.querySelectorAll<HTMLElement>('.artifact-file').forEach((node) => {
+      node.classList.toggle('is-active', node.dataset.artifactName === name && node.dataset.runId === runId);
+    });
+  } catch (error) {
+    preview.textContent = error instanceof Error ? error.message : String(error);
+  }
 }
 
 /* ── Sidebar and panel content ────────────────────────────────── */
@@ -1212,6 +1312,15 @@ input.addEventListener('keydown', (event) => {
 
 function handleChromeAction(action: string): void {
   switch (action) {
+    case 'artifacts':
+      void openArtifacts();
+      return;
+    case 'close-artifacts':
+      el<HTMLElement>('artifacts-view').hidden = true;
+      return;
+    case 'refresh-artifacts':
+      void loadArtifactCatalog();
+      return;
     case 'toggle-sidebar':
       layout.dataset.sidebar = layout.dataset.sidebar === 'hidden' ? 'shown' : 'hidden';
       return;
@@ -1303,6 +1412,19 @@ document.addEventListener('click', (event) => {
     }
     return;
   }
+  if (action === 'select-artifact-run') {
+    const runId = target.closest<HTMLElement>('[data-action="select-artifact-run"]')?.dataset.runId;
+    const runTitle = target.closest<HTMLElement>('.artifact-run')?.querySelector('.artifact-run__title')?.textContent ?? '';
+    if (runId) void selectArtifactRun(runId, runTitle);
+    return;
+  }
+  if (action === 'open-artifact-file') {
+    const fileButton = target.closest<HTMLElement>('[data-action="open-artifact-file"]');
+    if (fileButton?.dataset.runId && fileButton.dataset.artifactName) {
+      void openArtifactFile(fileButton.dataset.runId, fileButton.dataset.artifactName);
+    }
+    return;
+  }
 
   const workspaceNode = target.closest<HTMLElement>('[data-workspace-path]');
   if (workspaceNode?.dataset.workspacePath) {
@@ -1376,6 +1498,7 @@ async function loadHarnessData(workspaceOverride?: string): Promise<void> {
     currentProjects = await bridge.projects(parent);
     renderWorkspaceGroups(currentProjects);
     el('project-chip').firstChild!.textContent = workspace.replace(/\/+$/, '').split('/').pop() || workspace;
+    if (!el<HTMLElement>('artifacts-view').hidden) void loadArtifactCatalog();
   } catch (error) {
     el('connection-state').textContent = 'Harness offline';
     showNotice('Harness indisponível', error instanceof Error ? error.message : String(error), true);

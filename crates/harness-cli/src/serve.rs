@@ -147,6 +147,8 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/runs/events") => handle_run_events(&mut stream, query),
         ("GET", "/projects") => handle_projects(&mut stream, query),
         ("GET", "/runs/artifacts") => handle_artifacts(&mut stream, query),
+        ("GET", "/runs/catalog") => handle_run_catalog(&mut stream, query),
+        ("GET", "/runs/artifact") => handle_artifact_content(&mut stream, query),
         ("GET", "/config") => handle_get_config(&mut stream, query),
         ("POST", "/config") => handle_set_config(&mut stream, body),
         ("GET", "/account") => handle_account(&mut stream, query),
@@ -175,7 +177,8 @@ fn handle_set_pinned(stream: &mut TcpStream, body: &str) -> Result<(), String> {
     respond_json(
         stream,
         200,
-        &serde_json::json!({"session_id": request.session_id, "pinned": request.pinned}).to_string(),
+        &serde_json::json!({"session_id": request.session_id, "pinned": request.pinned})
+            .to_string(),
     )
 }
 
@@ -409,6 +412,187 @@ fn handle_artifacts(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     )
 }
 
+fn handle_run_catalog(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    use std::collections::BTreeMap;
+
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /runs/catalog exige ?workspace=<diretório>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let runs_root = workspace.join(".harness").join("runs");
+    let mut runs = BTreeMap::<String, Value>::new();
+    if let Ok(entries) = std::fs::read_dir(&runs_root) {
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let run_id = entry.file_name().to_string_lossy().into_owned();
+            if !valid_run_id(&run_id) {
+                continue;
+            }
+            let root = entry.path();
+            let understanding = read_json_value(&root.join("understanding.json"));
+            let report = read_json_value(&root.join("delivery_report.json"));
+            let run = read_json_value(&root.join("run.json"));
+            let states = report
+                .as_ref()
+                .and_then(|value| value.get("states"))
+                .or_else(|| run.as_ref().and_then(|value| value.get("states")))
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            let title = understanding
+                .as_ref()
+                .and_then(|value| value.get("summary").and_then(Value::as_str))
+                .or_else(|| {
+                    understanding
+                        .as_ref()
+                        .and_then(|value| value.get("goal").and_then(Value::as_str))
+                })
+                .unwrap_or("Execução do Harness");
+            let report_summary = report
+                .as_ref()
+                .and_then(|value| value.get("summary").and_then(Value::as_str))
+                .unwrap_or("");
+            let status = states
+                .as_array()
+                .and_then(|items| items.last())
+                .and_then(Value::as_str)
+                .unwrap_or("incomplete");
+            let files = artifact_names(&root);
+            let item = serde_json::json!({
+                "run_id": run_id,
+                "title": title,
+                "summary": report_summary,
+                "status": status,
+                "criteria_passed": report.as_ref().and_then(|value| value.get("criteria_passed")).and_then(Value::as_u64),
+                "criteria_total": report.as_ref().and_then(|value| value.get("criteria_total")).and_then(Value::as_u64),
+                "states": states,
+                "files": files,
+            });
+            runs.insert(run_id, item);
+        }
+    }
+    let jobs_root = workspace.join(".harness").join("jobs");
+    if let Ok(entries) = std::fs::read_dir(jobs_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(job) = read_json_value(&path) else {
+                continue;
+            };
+            let Some(run_id) = job.get("run_id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !valid_run_id(run_id) {
+                continue;
+            }
+            let root = runs_root.join(run_id);
+            let files = artifact_names(&root);
+            let item = serde_json::json!({
+                "run_id": run_id,
+                "title": job.get("request").and_then(Value::as_str).unwrap_or("Run do Harness"),
+                "summary": "",
+                "status": job.get("status").and_then(Value::as_str).unwrap_or("unknown"),
+                "criteria_passed": null,
+                "criteria_total": null,
+                "states": [],
+                "files": files,
+            });
+            runs.insert(run_id.to_owned(), item);
+        }
+    }
+    let mut values = runs.into_values().collect::<Vec<_>>();
+    values.sort_by(|left, right| {
+        right
+            .get("run_id")
+            .and_then(Value::as_str)
+            .cmp(&left.get("run_id").and_then(Value::as_str))
+    });
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"runs": values}).to_string(),
+    )
+}
+
+fn handle_artifact_content(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /runs/artifact exige ?workspace=<diretório>".to_owned())?;
+    let run_id =
+        query_value(query, "run_id").ok_or("GET /runs/artifact exige &run_id=<id>".to_owned())?;
+    let name = query_value(query, "name")
+        .ok_or("GET /runs/artifact exige &name=<arquivo.json>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let run_id = percent_decode(&run_id)?;
+    let name = percent_decode(&name)?;
+    if !valid_run_id(&run_id) {
+        return Err("run_id inválido".to_owned());
+    }
+    if Path::new(&name).file_name().and_then(|part| part.to_str()) != Some(name.as_str())
+        || !name.ends_with(".json")
+    {
+        return Err("nome de artefato inválido".to_owned());
+    }
+    let path = workspace
+        .join(".harness")
+        .join("runs")
+        .join(run_id)
+        .join(&name);
+    if !std::fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+    {
+        return Err("artefato não encontrado".to_owned());
+    }
+    let bytes =
+        std::fs::read(&path).map_err(|error| format!("não foi possível ler artefato: {error}"))?;
+    if bytes.len() > 256 * 1024 {
+        return Err("artefato excede o limite de 256 KiB".to_owned());
+    }
+    let content = String::from_utf8(bytes).map_err(|_| "artefato não é UTF-8".to_owned())?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"name": name, "content": content}).to_string(),
+    )
+}
+
+fn read_json_value(path: &Path) -> Option<Value> {
+    if !std::fs::symlink_metadata(path).ok()?.file_type().is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn valid_run_id(run_id: &str) -> bool {
+    !run_id.is_empty()
+        && !run_id.contains("..")
+        && run_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "-_.".contains(ch))
+}
+
+fn artifact_names(root: &Path) -> Vec<String> {
+    let mut files = std::fs::read_dir(root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            let name = entry.file_name().to_str()?.to_owned();
+            (file_type.is_file() && name.ends_with(".json")).then_some(name)
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
 fn handle_get_config(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     let workspace = query_value(query, "workspace")
         .ok_or("GET /config exige ?workspace=<diretório>".to_owned())?;
@@ -575,7 +759,10 @@ fn github_pr_summary(entry: &Value) -> Option<PullRequestSummary> {
         .as_str()?
         .to_owned();
     let url = entry.get("url")?.as_str()?.to_owned();
-    let is_draft = entry.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
+    let is_draft = entry
+        .get("isDraft")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     let stats = std::process::Command::new("gh")
         .args([
@@ -597,9 +784,21 @@ fn github_pr_summary(entry: &Value) -> Option<PullRequestSummary> {
         repo,
         number,
         url,
-        additions: stats.as_ref().and_then(|s| s.get("additions")).and_then(Value::as_u64).unwrap_or(0),
-        deletions: stats.as_ref().and_then(|s| s.get("deletions")).and_then(Value::as_u64).unwrap_or(0),
-        files: stats.as_ref().and_then(|s| s.get("changedFiles")).and_then(Value::as_u64).unwrap_or(0),
+        additions: stats
+            .as_ref()
+            .and_then(|s| s.get("additions"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        deletions: stats
+            .as_ref()
+            .and_then(|s| s.get("deletions"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        files: stats
+            .as_ref()
+            .and_then(|s| s.get("changedFiles"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
         ready: !is_draft,
     })
 }
@@ -758,5 +957,15 @@ mod tests {
     fn malformed_query_escape_is_rejected() {
         assert!(percent_decode("%2").is_err());
         assert!(percent_decode("%GG").is_err());
+    }
+
+    #[test]
+    fn run_ids_are_safe_path_components() {
+        assert!(valid_run_id("run-20261026-abc_123.ok"));
+        assert!(!valid_run_id(""));
+        assert!(!valid_run_id(".."));
+        assert!(!valid_run_id("../outside"));
+        assert!(!valid_run_id("run/id"));
+        assert!(!valid_run_id("run id"));
     }
 }

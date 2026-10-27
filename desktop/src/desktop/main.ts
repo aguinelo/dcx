@@ -346,6 +346,8 @@ ipcMain.handle('harness:account', (_event, workspace: string) => getHarnessClien
 ipcMain.handle('harness:gitBranch', (_event, workspace: string) => getHarnessClient().gitBranch(workspace));
 ipcMain.handle('harness:githubRepos', () => getHarnessClient().githubRepos());
 ipcMain.handle('harness:githubPrs', () => getHarnessClient().githubPrs());
+ipcMain.handle('harness:runCatalog', (_event, workspace: string) => getHarnessClient().runCatalog(workspace));
+ipcMain.handle('harness:artifact', (_event, workspace: string, runId: string, name: string) => getHarnessClient().artifact(workspace, runId, name));
 
 ipcMain.handle('auth:status', async () => {
   try {

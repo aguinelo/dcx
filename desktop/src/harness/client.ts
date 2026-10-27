@@ -39,6 +39,17 @@ export interface HarnessRun {
   created_at_unix_ms: number;
 }
 
+export interface HarnessRunArtifactSummary {
+  run_id: string;
+  title: string;
+  summary: string;
+  status: string;
+  criteria_passed: number | null;
+  criteria_total: number | null;
+  states: string[];
+  files: string[];
+}
+
 export interface HarnessEvent {
   event: string;
   data: Record<string, unknown>;
@@ -157,6 +168,16 @@ export class HarnessClient {
   async status(workspace: string, runId: string): Promise<HarnessRun> {
     return this.get(
       `/runs/status?workspace=${encodeURIComponent(workspace)}&run_id=${encodeURIComponent(runId)}`,
+    );
+  }
+
+  async runCatalog(workspace: string): Promise<{ runs: HarnessRunArtifactSummary[] }> {
+    return this.get(`/runs/catalog?workspace=${encodeURIComponent(workspace)}`);
+  }
+
+  async artifact(workspace: string, runId: string, name: string): Promise<{ name: string; content: string }> {
+    return this.get(
+      `/runs/artifact?workspace=${encodeURIComponent(workspace)}&run_id=${encodeURIComponent(runId)}&name=${encodeURIComponent(name)}`,
     );
   }
 
