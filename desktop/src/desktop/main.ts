@@ -23,6 +23,7 @@ let mainWindow: BrowserWindow | undefined;
 let context: ToolContext | undefined;
 let registry: ToolRegistry | undefined;
 let abortController: AbortController | undefined;
+const terminalShells = new Map<string, PersistentShell>();
 
 function getHarnessWorkspace(): string {
   return process.env.HARNESS_WORKSPACE ?? app.getPath('home');
@@ -156,6 +157,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   getContext().shell.close();
+  for (const shellSession of terminalShells.values()) shellSession.close();
+  terminalShells.clear();
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -227,7 +230,9 @@ ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | u
 });
 
 ipcMain.handle('harness:addContextRepo', async (_event, workspace: string) => {
-  const picker = await dialog.showOpenDialog(mainWindow!, {
+  const ownerWindow = mainWindow;
+  if (!ownerWindow) return undefined;
+  const picker = await dialog.showOpenDialog(ownerWindow, {
     title: 'Adicionar repositório ao contexto',
     buttonLabel: 'Selecionar repositório',
     properties: ['openDirectory'],
@@ -252,7 +257,7 @@ ipcMain.handle('harness:addContextRepo', async (_event, workspace: string) => {
   } catch {
     // Permission copy stays accurate even while the daemon is unavailable.
   }
-  const answer = await dialog.showMessageBox(mainWindow!, {
+  const answer = await dialog.showMessageBox(ownerWindow, {
     type: 'warning',
     title: 'Autorizar acesso ao repositório?',
     message: `Permitir que o Harness leia ${path.basename(canonical)}?`,
@@ -263,6 +268,47 @@ ipcMain.handle('harness:addContextRepo', async (_event, workspace: string) => {
     noLink: true,
   });
   return answer.response === 1 ? canonical : undefined;
+});
+
+ipcMain.handle('terminal:run', async (_event, workspace: string, command: string) => {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error('Digite um comando.');
+  if (trimmed.length > 4_000) throw new Error('O comando excede o limite de 4.000 caracteres.');
+  const ownerWindow = mainWindow;
+  if (!ownerWindow) throw new Error('A janela do desktop não está disponível.');
+  const cwd = await realpath(workspace);
+  const answer = await dialog.showMessageBox(ownerWindow, {
+    type: 'warning',
+    title: 'Executar comando no terminal?',
+    message: `O comando será executado em ${cwd}`,
+    detail: `${trimmed}\n\nComandos podem ler e alterar arquivos e acessar a rede. Execute apenas o que você revisou.`,
+    buttons: ['Cancelar', 'Executar comando'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  if (answer.response !== 1) return { cancelled: true, stdout: '', exitCode: -1, timedOut: false };
+
+  let shellSession = terminalShells.get(cwd);
+  if (!shellSession) {
+    shellSession = new PersistentShell(cwd);
+    terminalShells.set(cwd, shellSession);
+  }
+  const result = await shellSession.run(trimmed, { timeoutMs: 60_000 });
+  const outputLimit = 60_000;
+  const truncated = result.stdout.length > outputLimit;
+  return {
+    cancelled: false,
+    stdout: truncated ? `[saída truncada; exibindo os últimos ${outputLimit} caracteres]\n${result.stdout.slice(-outputLimit)}` : result.stdout,
+    exitCode: result.exitCode,
+    timedOut: result.timedOut,
+  };
+});
+
+ipcMain.handle('terminal:restart', async (_event, workspace: string) => {
+  const cwd = await realpath(workspace);
+  terminalShells.get(cwd)?.restart();
+  return true;
 });
 
 ipcMain.handle('agent:cancel', () => {

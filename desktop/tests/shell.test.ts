@@ -125,6 +125,19 @@ describe('PersistentShell', () => {
     try {
       const result = await shell.run('sleep 5', { timeoutMs: 150 });
       assert.equal(result.timedOut, true);
+      const recovered = await shell.run('echo recovered');
+      assert.equal(recovered.stdout.trim(), 'recovered');
+    } finally {
+      shell.close();
+    }
+  });
+
+  it('caps captured command output', async () => {
+    const shell = makeShell();
+    try {
+      const result = await shell.run("head -c 1200000 /dev/zero | tr '\\0' x");
+      assert.match(result.stdout, /^\[saída truncada pelo limite de captura\]/);
+      assert.ok(result.stdout.length <= 1_000_000 + 64);
     } finally {
       shell.close();
     }

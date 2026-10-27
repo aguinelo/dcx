@@ -1129,6 +1129,45 @@ button {
   font-size: var(--fs-code);
   line-height: 1.6;
 }
+.terminal__form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.terminal__prompt {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+.terminal__input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+}
+.terminal__input:focus {
+  outline: 1px solid var(--accent);
+}
+.terminal__run {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+.terminal__run:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.terminal__run:disabled,
+.terminal__input:disabled {
+  opacity: 0.55;
+}
 .term-line {
   white-space: pre-wrap;
   word-break: break-word;

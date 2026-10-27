@@ -5,7 +5,7 @@
  * and sends prompts back. The only reason this file exists is the DOM.
  */
 
-import { TERMINAL_SESSIONS, type BackgroundTask } from './mock.ts';
+import type { BackgroundTask } from './mock.ts';
 
 interface AgentEventPayload {
   type: 'text' | 'progress' | 'tool_start' | 'tool_end' | 'denied' | 'done' | 'error' | 'run_event' | 'session';
@@ -68,6 +68,8 @@ interface ReplBridge {
   addContextRepo(workspace: string): Promise<string | undefined>;
   authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
   authLogout(): Promise<{ loggedIn: boolean }>;
+  terminalRun(workspace: string, command: string): Promise<{ cancelled: boolean; stdout: string; exitCode: number; timedOut: boolean }>;
+  terminalRestart(workspace: string): Promise<boolean>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;
@@ -98,6 +100,7 @@ let thoughtCount = 0;
 let commandCount = 0;
 let editCount = 0;
 let currentProjects: Array<{ path: string }> = [];
+let terminalWorkspaceDisplayed = '';
 
 const CONTEXT_REPOS_KEY = 'harness.contextRepos';
 
@@ -475,19 +478,52 @@ function renderStaticRegions(workspace: string): void {
   applyTheme(savedTheme);
 }
 
-function renderTerminal(sessionKey: string): void {
-  const session = TERMINAL_SESSIONS[sessionKey];
-  if (!session) return;
+function renderTerminal(): void {
+  const label = currentWorkspace.replace(/\/+$/, '').split('/').pop() || currentWorkspace;
+  el('terminal-label').textContent = `Terminal ${label}`;
+  const output = el<HTMLDivElement>('terminal-body');
+  if (terminalWorkspaceDisplayed !== currentWorkspace) {
+    terminalWorkspaceDisplayed = currentWorkspace;
+    output.replaceChildren();
+    const note = document.createElement('div');
+    note.className = 'term-line term-line--note';
+    note.textContent = 'Comandos são executados no workspace selecionado após sua confirmação.';
+    output.append(note);
+  }
+  el<HTMLInputElement>('terminal-input').focus();
+}
 
-  el('terminal-label').textContent = `Terminal ${session.label}`;
-  el('terminal-body').replaceChildren(
-    ...session.lines.map((line) => {
-      const node = document.createElement('div');
-      node.className = `term-line term-line--${line.kind}`;
-      node.textContent = line.text;
-      return node;
-    }),
-  );
+function appendTerminalLine(kind: 'prompt' | 'output' | 'note', text: string): void {
+  const output = el<HTMLDivElement>('terminal-body');
+  const line = document.createElement('div');
+  line.className = `term-line term-line--${kind}`;
+  line.textContent = text;
+  output.append(line);
+  output.scrollTop = output.scrollHeight;
+}
+
+async function runTerminalCommand(command: string): Promise<void> {
+  appendTerminalLine('prompt', `${currentWorkspace} › ${command}`);
+  const input = el<HTMLInputElement>('terminal-input');
+  const button = el<HTMLButtonElement>('terminal-run');
+  input.disabled = true;
+  button.disabled = true;
+  try {
+    const result = await bridge.terminalRun(currentWorkspace, command);
+    if (result.cancelled) {
+      appendTerminalLine('note', 'Execução cancelada.');
+      return;
+    }
+    if (result.stdout.trim()) appendTerminalLine('output', result.stdout.trimEnd());
+    if (result.timedOut) appendTerminalLine('note', 'Tempo limite de 60 s atingido.');
+    else appendTerminalLine('note', `Processo encerrado com código ${result.exitCode}.`);
+  } catch (error) {
+    appendTerminalLine('note', error instanceof Error ? error.message : String(error));
+  } finally {
+    input.disabled = false;
+    button.disabled = false;
+    input.focus();
+  }
 }
 
 function setTerminal(open: boolean): void {
@@ -1156,6 +1192,15 @@ async function submit(): Promise<void> {
 
 input.addEventListener('input', autoGrow);
 
+el<HTMLFormElement>('terminal-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const terminalInput = el<HTMLInputElement>('terminal-input');
+  const command = terminalInput.value.trim();
+  if (!command) return;
+  terminalInput.value = '';
+  void runTerminalCommand(command);
+});
+
 input.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -1174,8 +1219,16 @@ function handleChromeAction(action: string): void {
       layout.dataset.panel = layout.dataset.panel === 'hidden' ? 'shown' : 'hidden';
       return;
     case 'terminal':
-      if (layout.dataset.terminal !== 'open') renderTerminal('repl');
+      if (layout.dataset.terminal !== 'open') renderTerminal();
       setTerminal(layout.dataset.terminal !== 'open');
+      return;
+    case 'terminal-restart':
+      void bridge.terminalRestart(currentWorkspace).then(() => {
+        terminalWorkspaceDisplayed = '';
+        renderTerminal();
+      }).catch((error: unknown) => {
+        showNotice('Não foi possível reiniciar o shell', error instanceof Error ? error.message : String(error), true);
+      });
       return;
     case 'toggle-terminal':
       setTerminal(false);

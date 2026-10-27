@@ -15,6 +15,7 @@ interface Pending {
   resolve: (result: ShellRunResult) => void;
   timer: NodeJS.Timeout | undefined;
   out: string;
+  truncated: boolean;
   /** Sentinel id used to frame this call's output. */
   key: string;
   /** Which spawned process owns this call. */
@@ -23,6 +24,7 @@ interface Pending {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const SENTINEL = '__repl_done_';
+const MAX_CAPTURED_OUTPUT_CHARS = 1_000_000;
 
 /**
  * A real long-lived bash process.
@@ -57,6 +59,7 @@ export class PersistentShell {
       cwd: this.workdir,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
 
     const generation = ++this.generation;
@@ -69,11 +72,18 @@ export class PersistentShell {
         if (entry.generation !== generation) continue;
 
         entry.out += chunk;
+        if (entry.out.length > MAX_CAPTURED_OUTPUT_CHARS) {
+          entry.out = entry.out.slice(-MAX_CAPTURED_OUTPUT_CHARS);
+          entry.truncated = true;
+        }
         const marker = `${SENTINEL}${entry.key}:`;
         const at = entry.out.indexOf(marker);
         if (at === -1) continue;
 
-        const stdout = entry.out.slice(0, at);
+        const captured = entry.out.slice(0, at);
+        const stdout = entry.truncated
+          ? `[saída truncada pelo limite de captura]\n${captured}`
+          : captured;
         const rest = entry.out.slice(at + marker.length);
         const endOfCode = rest.search(/\D/);
         const code = Number.parseInt(endOfCode === -1 ? rest : rest.slice(0, endOfCode), 10);
@@ -91,7 +101,10 @@ export class PersistentShell {
       // Only calls owned by this process are settled here.
       for (const entry of [...this.pending]) {
         if (entry.generation !== generation) continue;
-        this.settle(entry, { stdout: entry.out, exitCode: code ?? -1, timedOut: false });
+        const stdout = entry.truncated
+          ? `[saída truncada pelo limite de captura]\n${entry.out}`
+          : entry.out;
+        this.settle(entry, { stdout, exitCode: code ?? -1, timedOut: false });
       }
     };
 
@@ -136,11 +149,16 @@ export class PersistentShell {
         resolve,
         timer: undefined,
         out: '',
+        truncated: false,
         generation,
         key,
       };
       entry.timer = setTimeout(() => {
-        this.settle(entry, { stdout: entry.out, exitCode: -1, timedOut: true });
+        const stdout = entry.truncated
+          ? `[saída truncada pelo limite de captura]\n${entry.out}`
+          : entry.out;
+        this.settle(entry, { stdout, exitCode: -1, timedOut: true });
+        this.restart();
       }, timeoutMs);
 
       this.pending.add(entry);
@@ -170,7 +188,7 @@ export class PersistentShell {
       }
     }
 
-    dying?.kill('SIGKILL');
+    if (dying) this.killProcessGroup(dying);
   }
 
   /**
@@ -193,10 +211,22 @@ export class PersistentShell {
 
     if (!proc) return;
 
-    proc.kill('SIGKILL');
+    this.killProcessGroup(proc);
     proc.stdin.destroy();
     proc.stdout.destroy();
     proc.stderr.destroy();
     proc.unref();
+  }
+
+  private killProcessGroup(proc: ChildProcessWithoutNullStreams): void {
+    if (process.platform !== 'win32' && proc.pid) {
+      try {
+        process.kill(-proc.pid, 'SIGKILL');
+        return;
+      } catch {
+        // Fall back to killing the shell itself if its process group is gone.
+      }
+    }
+    proc.kill('SIGKILL');
   }
 }

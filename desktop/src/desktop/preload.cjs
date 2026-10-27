@@ -14,7 +14,8 @@ ipcRenderer.on('agent:event', (_event, payload) => handler(payload));
 
 contextBridge.exposeInMainWorld('repl', {
   /** Start a turn. Resolves when the turn ends, however it ends. */
-  run: (prompt, workspace, sessionId, contextWorkspaces) => ipcRenderer.invoke('agent:run', prompt, workspace, sessionId, contextWorkspaces),
+  run: (prompt, workspace, sessionId, contextWorkspaces) =>
+    ipcRenderer.invoke('agent:run', prompt, workspace, sessionId, contextWorkspaces),
 
   /** Abort the turn in flight. */
   cancel: () => ipcRenderer.invoke('agent:cancel'),
@@ -32,7 +33,8 @@ contextBridge.exposeInMainWorld('repl', {
 
   workspace: () => ipcRenderer.invoke('harness:workspace'),
   sessions: (workspace) => ipcRenderer.invoke('harness:sessions', workspace),
-  setPinned: (workspace, sessionId, pinned) => ipcRenderer.invoke('harness:setPinned', workspace, sessionId, pinned),
+  setPinned: (workspace, sessionId, pinned) =>
+    ipcRenderer.invoke('harness:setPinned', workspace, sessionId, pinned),
   session: (workspace, sessionId) => ipcRenderer.invoke('harness:session', workspace, sessionId),
   projects: (root) => ipcRenderer.invoke('harness:projects', root),
   config: (workspace) => ipcRenderer.invoke('harness:config', workspace),
@@ -48,4 +50,6 @@ contextBridge.exposeInMainWorld('repl', {
   approve: (workspace, sessionId) => ipcRenderer.invoke('harness:approve', workspace, sessionId),
   start: (workspace, sessionId) => ipcRenderer.invoke('harness:start', workspace, sessionId),
   cancelRun: (workspace, runId) => ipcRenderer.invoke('harness:cancelRun', workspace, runId),
+  terminalRun: (workspace, command) => ipcRenderer.invoke('terminal:run', workspace, command),
+  terminalRestart: (workspace) => ipcRenderer.invoke('terminal:restart', workspace),
 });

@@ -146,12 +146,17 @@
       <aside class="terminal" id="terminal">
         <header class="terminal__head">
           <span class="terminal__tabs">
-            <span class="terminal__tab is-active" id="terminal-label">Terminal repl</span>
-            <button class="iconbtn iconbtn--tiny" title="Nova sessão">+</button>
+            <span class="terminal__tab is-active" id="terminal-label">Terminal</span>
+            <button class="iconbtn iconbtn--tiny" data-action="terminal-restart" title="Reiniciar sessão do shell">↻</button>
           </span>
           <button class="iconbtn" data-action="toggle-terminal" title="Fechar terminal">✕</button>
         </header>
-        <div class="terminal__body" id="terminal-body"></div>
+        <div class="terminal__body" id="terminal-body" role="log" aria-live="polite"></div>
+        <form class="terminal__form" id="terminal-form">
+          <span class="terminal__prompt">›</span>
+          <input class="terminal__input" id="terminal-input" autocomplete="off" spellcheck="false" aria-label="Comando do terminal" placeholder="Digite um comando e pressione Enter" />
+          <button class="terminal__run" id="terminal-run" type="submit">Executar</button>
+        </form>
       </aside>
     </div>
 
