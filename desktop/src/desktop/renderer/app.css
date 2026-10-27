@@ -453,6 +453,28 @@ button {
 .artifact-file { padding: 7px; color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-caption); overflow-wrap: anywhere; }
 .artifacts-view__preview { margin: 0; padding: 18px; overflow: auto; color: var(--text); font-family: var(--font-mono); font-size: var(--fs-code); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .artifacts-view__empty { padding: 12px; color: var(--muted); font-size: var(--fs-caption); }
+.search-view {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 28px 24px;
+  background: var(--bg);
+}
+.search-view[hidden] { display: none; }
+.search-view__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0; border-bottom: 1px solid var(--border); }
+.search-view__head h1 { margin: 0; font-size: var(--fs-prose); }
+.search-view__head p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-caption); }
+.search-view__field { display: flex; align-items: center; gap: 10px; margin: 20px auto 12px; padding: 10px 14px; width: min(100%, 720px); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-subtle); color: var(--muted); }
+.search-view__field input { flex: 1; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; }
+.search-view__results { width: min(100%, 720px); margin: 0 auto; padding: 0; overflow-y: auto; list-style: none; }
+.session-search-result { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 14px; text-align: left; border-radius: var(--radius-md); color: var(--text); }
+.session-search-result:hover { background: var(--bg-hover); }
+.session-search-result strong { font-size: var(--fs-body-sm); font-weight: 600; }
+.session-search-result span { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: var(--fs-caption); line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.session-search-result small { color: var(--muted); font-size: var(--fs-caption); }
 .chat__scroll {
   flex: 1;
   overflow-y: auto;

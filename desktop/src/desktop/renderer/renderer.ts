@@ -56,6 +56,7 @@ interface ReplBridge {
   cancelRun(workspace: string, runId: string): Promise<void>;
   runCatalog(workspace: string): Promise<{ runs: Array<{ run_id: string; title: string; summary: string; status: string; criteria_passed: number | null; criteria_total: number | null; states: string[]; files: string[] }> }>;
   artifact(workspace: string, runId: string, name: string): Promise<{ name: string; content: string }>;
+  searchSessions(workspace: string, query: string): Promise<{ results: Array<{ session_id: string; title: string; snippet: string; role: string; updated_at_unix_ms: number }> }>;
   config(workspace: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   setConfig(
     workspace: string,
@@ -104,6 +105,7 @@ let editCount = 0;
 let currentProjects: Array<{ path: string }> = [];
 let terminalWorkspaceDisplayed = '';
 let selectedArtifactRun: string | undefined;
+let searchSequence = 0;
 
 const CONTEXT_REPOS_KEY = 'harness.contextRepos';
 
@@ -200,8 +202,67 @@ function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
 }
 
 async function openArtifacts(): Promise<void> {
+  el<HTMLElement>('search-view').hidden = true;
   el<HTMLElement>('artifacts-view').hidden = false;
   await loadArtifactCatalog();
+}
+
+function openSearch(): void {
+  el<HTMLElement>('artifacts-view').hidden = true;
+  el<HTMLElement>('search-view').hidden = false;
+  const input = el<HTMLInputElement>('session-search-input');
+  input.focus();
+  input.select();
+}
+
+async function searchSessions(query: string): Promise<void> {
+  const sequence = ++searchSequence;
+  const list = el<HTMLUListElement>('session-search-results');
+  list.replaceChildren();
+  if (query.trim().length < 2) {
+    const empty = document.createElement('li');
+    empty.className = 'artifacts-view__empty';
+    empty.textContent = 'Digite pelo menos 2 caracteres.';
+    list.append(empty);
+    return;
+  }
+  const loading = document.createElement('li');
+  loading.className = 'artifacts-view__empty';
+  loading.textContent = 'Buscando nas conversas…';
+  list.append(loading);
+  try {
+    const { results } = await bridge.searchSessions(currentWorkspace, query.trim());
+    if (sequence !== searchSequence) return;
+    list.replaceChildren();
+    for (const result of results) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.className = 'session-search-result';
+      button.dataset.action = 'open-search-result';
+      button.dataset.sessionId = result.session_id;
+      const title = document.createElement('strong');
+      title.textContent = result.title || 'Nova conversa';
+      const snippet = document.createElement('span');
+      snippet.textContent = result.snippet;
+      const meta = document.createElement('small');
+      meta.textContent = result.role === 'user' ? 'Você' : 'Assistente';
+      button.append(title, snippet, meta);
+      item.append(button);
+      list.append(item);
+    }
+    if (results.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'artifacts-view__empty';
+      empty.textContent = 'Nenhuma mensagem encontrada neste workspace.';
+      list.append(empty);
+    }
+  } catch (error) {
+    if (sequence !== searchSequence) return;
+    const empty = document.createElement('li');
+    empty.className = 'artifacts-view__empty';
+    empty.textContent = error instanceof Error ? error.message : String(error);
+    list.replaceChildren(empty);
+  }
 }
 
 async function loadArtifactCatalog(): Promise<void> {
@@ -1312,6 +1373,12 @@ input.addEventListener('keydown', (event) => {
 
 function handleChromeAction(action: string): void {
   switch (action) {
+    case 'search':
+      openSearch();
+      return;
+    case 'close-search':
+      el<HTMLElement>('search-view').hidden = true;
+      return;
     case 'artifacts':
       void openArtifacts();
       return;
@@ -1425,6 +1492,14 @@ document.addEventListener('click', (event) => {
     }
     return;
   }
+  if (action === 'open-search-result') {
+    const sessionId = target.closest<HTMLElement>('[data-action="open-search-result"]')?.dataset.sessionId;
+    if (sessionId) {
+      el<HTMLElement>('search-view').hidden = true;
+      void loadSession(currentWorkspace, sessionId);
+    }
+    return;
+  }
 
   const workspaceNode = target.closest<HTMLElement>('[data-workspace-path]');
   if (workspaceNode?.dataset.workspacePath) {
@@ -1477,6 +1552,11 @@ document.addEventListener('click', (event) => {
   if (action) handleChromeAction(action);
 });
 
+el<HTMLInputElement>('session-search-input').addEventListener('input', (event) => {
+  const query = (event.currentTarget as HTMLInputElement).value;
+  void searchSessions(query);
+});
+
 async function loadHarnessData(workspaceOverride?: string): Promise<void> {
   try {
     let savedWorkspace: string | null = null;
@@ -1499,6 +1579,9 @@ async function loadHarnessData(workspaceOverride?: string): Promise<void> {
     renderWorkspaceGroups(currentProjects);
     el('project-chip').firstChild!.textContent = workspace.replace(/\/+$/, '').split('/').pop() || workspace;
     if (!el<HTMLElement>('artifacts-view').hidden) void loadArtifactCatalog();
+    if (!el<HTMLElement>('search-view').hidden) {
+      void searchSessions(el<HTMLInputElement>('session-search-input').value);
+    }
   } catch (error) {
     el('connection-state').textContent = 'Harness offline';
     showNotice('Harness indisponível', error instanceof Error ? error.message : String(error), true);

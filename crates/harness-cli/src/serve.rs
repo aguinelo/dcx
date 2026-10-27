@@ -134,6 +134,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
     match (method, route) {
         ("GET", "/health") => respond_json(&mut stream, 200, r#"{"status":"ok"}"#),
         ("GET", "/sessions") => handle_sessions(&mut stream, query),
+        ("GET", "/sessions/search") => handle_session_search(&mut stream, query),
         ("POST", "/sessions/pin") => handle_set_pinned(&mut stream, body),
         ("GET", "/session") => handle_session(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
@@ -167,6 +168,67 @@ fn handle_sessions(stream: &mut TcpStream, query: &str) -> Result<(), String> {
     let body = serde_json::to_string(&serde_json::json!({"sessions": sessions}))
         .map_err(|error| format!("não foi possível serializar sessões: {error}"))?;
     respond_json(stream, 200, &body)
+}
+
+fn handle_session_search(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /sessions/search exige ?workspace=<diretório>".to_owned())?;
+    let term = query_value(query, "q").ok_or("GET /sessions/search exige &q=<termo>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let term = percent_decode(&term)?.trim().to_lowercase();
+    if term.chars().count() < 2 {
+        return respond_json(stream, 200, "{\"results\":[]}");
+    }
+
+    let sessions = chat::list_sessions(&workspace)?;
+    let mut results = Vec::new();
+    for summary in sessions {
+        let Ok(session) = chat::session(&workspace, &summary.session_id) else {
+            continue;
+        };
+        if let Some(message) = session
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.content.to_lowercase().contains(&term))
+        {
+            results.push(serde_json::json!({
+                "session_id": summary.session_id,
+                "title": summary.title,
+                "snippet": search_excerpt(&message.content, &term),
+                "role": message.role,
+                "updated_at_unix_ms": message.created_at_unix_ms,
+            }));
+            if results.len() == 100 {
+                break;
+            }
+        }
+    }
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"results": results}).to_string(),
+    )
+}
+
+fn search_excerpt(content: &str, term: &str) -> String {
+    let chars = content.chars().collect::<Vec<_>>();
+    let normalized = chars
+        .iter()
+        .map(|ch| ch.to_lowercase().collect::<String>())
+        .collect::<String>();
+    let start_byte = normalized.find(term).unwrap_or(0);
+    let normalized_prefix = &normalized[..start_byte];
+    let start_char = normalized_prefix.chars().count().saturating_sub(80);
+    let end_char = (start_char + 240).min(chars.len());
+    let mut excerpt = chars[start_char..end_char].iter().collect::<String>();
+    if start_char > 0 {
+        excerpt.insert(0, '…');
+    }
+    if end_char < chars.len() {
+        excerpt.push('…');
+    }
+    excerpt
 }
 
 fn handle_set_pinned(stream: &mut TcpStream, body: &str) -> Result<(), String> {
@@ -967,5 +1029,17 @@ mod tests {
         assert!(!valid_run_id("../outside"));
         assert!(!valid_run_id("run/id"));
         assert!(!valid_run_id("run id"));
+    }
+
+    #[test]
+    fn search_excerpt_centers_on_case_insensitive_match() {
+        let content = format!(
+            "{} Consulte a Política de reembolso e o prazo.",
+            "x".repeat(100)
+        );
+        let excerpt = search_excerpt(&content, "política");
+        assert!(excerpt.contains("Política de reembolso"));
+        assert!(excerpt.starts_with('…'));
+        assert!(excerpt.len() < content.len());
     }
 }

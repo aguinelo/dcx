@@ -50,6 +50,14 @@ export interface HarnessRunArtifactSummary {
   files: string[];
 }
 
+export interface HarnessSessionSearchResult {
+  session_id: string;
+  title: string;
+  snippet: string;
+  role: string;
+  updated_at_unix_ms: number;
+}
+
 export interface HarnessEvent {
   event: string;
   data: Record<string, unknown>;
@@ -137,6 +145,12 @@ export class HarnessClient {
       `/sessions?workspace=${encodeURIComponent(workspace)}`,
     );
     return response.sessions;
+  }
+
+  async searchSessions(workspace: string, query: string): Promise<{ results: HarnessSessionSearchResult[] }> {
+    return this.get(
+      `/sessions/search?workspace=${encodeURIComponent(workspace)}&q=${encodeURIComponent(query)}`,
+    );
   }
 
   async setPinned(workspace: string, sessionId: string, pinned: boolean): Promise<{ pinned: boolean }> {
