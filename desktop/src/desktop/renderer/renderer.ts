@@ -181,6 +181,7 @@ async function addContextRepo(): Promise<void> {
 
 function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
   el('groups').replaceChildren(
+    renderContextRepos(),
     projectSection({
       name: 'Workspaces',
       items: projects.map((project) => ({
@@ -189,7 +190,6 @@ function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
         active: project.path === currentWorkspace,
       })),
     }),
-    renderContextRepos(),
   );
 }
 
