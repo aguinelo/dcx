@@ -142,8 +142,25 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            Some("status") => {
+                if args.next().as_deref() != Some("--id") {
+                    eprintln!("Uso: harness loop status --id <loop_id>");
+                    std::process::exit(2);
+                }
+                let id = args.next().unwrap_or_default();
+                if id.is_empty() || args.next().is_some() {
+                    eprintln!("Uso: harness loop status --id <loop_id>");
+                    std::process::exit(2);
+                }
+                if let Err(error) = loop_queue::status(&id) {
+                    eprintln!("Falha ao consultar a fila: {error}");
+                    std::process::exit(1);
+                }
+            }
             _ => {
-                eprintln!("Uso: harness loop <start --file <tasks.json> | resume --id <loop_id>>");
+                eprintln!(
+                    "Uso: harness loop <start --file <tasks.json> | resume --id <loop_id> | status --id <loop_id>>"
+                );
                 std::process::exit(2);
             }
         },
@@ -283,7 +300,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|loop start --file <tasks.json>|loop resume --id <loop_id>|resume --run <run_id>|dispute --run <id> ...|state prune ...|--version|run ...>"
+                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|loop start --file <tasks.json>|loop resume --id <loop_id>|loop status --id <loop_id>|resume --run <run_id>|dispute --run <id> ...|state prune ...|--version|run ...>"
             );
             std::process::exit(2);
         }

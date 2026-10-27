@@ -11,7 +11,7 @@ de conversa e execução.
 | 1. Sessões confiáveis | Concluída | Criar uma conversa nova não reutiliza a sessão anterior; removido o fluxo de simulação que confundia o estado real. |
 | 2. Dados reais de trabalho | Concluída | Alterações mostra PRs reais via `gh`; tarefas em segundo plano acompanham runs do Harness e podem ser canceladas. |
 | 3. Troca de workspace | Concluída | Itens locais em Workspaces são selecionáveis; o seletor nativo adiciona qualquer pasta; histórico, configurações e conversas usam o projeto escolhido; workspaces recentes persistem entre aberturas. |
-| 4. Ferramentas da interface | Concluída | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON, busca local e rotinas com agendamento recorrente de 1 h a 7 dias. |
+| 4. Ferramentas da interface | Concluída | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON, busca local, rotinas com agendamento recorrente de 1 h a 7 dias e retomada de runs após reinício do daemon. |
 | 5. Distribuição | Em andamento | Empacotamento macOS reproduzível em DMG, CLI Harness incluído e daemon local iniciado automaticamente quando necessário. Assinatura, notarização, ícone próprio e atualização automática ficam para a etapa seguinte. |
 
 ## Critérios de conclusão
@@ -24,6 +24,7 @@ de conversa e execução.
 - A busca encontra mensagens apenas no workspace atual e abre a conversa correspondente sem enviar conteúdo para um provedor.
 - Rotinas são persistidas por workspace; usar uma rotina prepara uma conversa nova e não envia nada antes de revisão e envio pelo usuário.
 - Agendamentos ficam desativados por padrão, exigem confirmação, executam em modo somente leitura e registram status e custo conhecido.
+- Runs em andamento são retomados após o reinício do daemon; se o contrato ainda não foi aprovado, o fluxo recomeça e pede aprovação novamente.
 - O DMG de desenvolvimento inclui o CLI do Harness; o app inicia o daemon local quando o endpoint padrão está indisponível e não assume controle de endpoints customizados.
 - A interface não apresenta dados simulados como se fossem dados reais.
 - `cd desktop && npm run typecheck && npm run build` passa antes de cada entrega.

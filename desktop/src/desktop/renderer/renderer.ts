@@ -1421,6 +1421,14 @@ bridge.onEvent((payload) => {
         busy = false;
         setPlaceholder();
         setThinking(false);
+      } else if (payload.event === 'recovered') {
+        showNotice('Run retomado', 'O daemon reiniciou e o trabalho continuou de onde parou.', false);
+      } else if (payload.event === 'recovery_stopped' || payload.event === 'recovery_failed') {
+        showNotice('Run interrompido', String(payload.data?.reason ?? 'Não foi possível retomar.'), true);
+        if (payload.runId) finishRunTask(payload.runId);
+        busy = false;
+        setPlaceholder();
+        setThinking(false);
       }
       break;
 

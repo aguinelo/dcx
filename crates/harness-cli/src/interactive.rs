@@ -37,6 +37,9 @@ pub fn run_tracked(
     metrics::reset();
 
     let workspace = std::env::current_dir()?;
+    if let Ok(run_id) = std::env::var("HARNESS_RUN_ID") {
+        let _ = crate::jobs::set_worker_pid(&workspace, &run_id, Some(std::process::id()), false);
+    }
     let _lock = ProjectLock::acquire(&workspace)?;
     let mut analyst = providers::analyst()?;
     let mut lifecycle = RunLifecycle::new();
@@ -199,6 +202,7 @@ pub fn run_tracked(
 pub fn resume(run_id: &str) -> InteractiveResult<()> {
     validate_run_id(run_id)?;
     let workspace = std::env::current_dir()?;
+    let _ = crate::jobs::set_worker_pid(&workspace, run_id, Some(std::process::id()), false);
     let _lock = ProjectLock::acquire(&workspace)?;
     let artifact_dir = workspace.join(".harness").join("runs").join(run_id);
     if !artifact_dir.is_dir() {
@@ -211,29 +215,75 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
     }
     metrics::resume_from(&artifact_dir.join("metrics.json"))?;
     let bundle: ContractBundle = read_json(&artifact_dir.join("contract_bundle.json"))?;
-    let plan: Plan = read_json(&artifact_dir.join("plan.json"))?;
-    let implementation: SensorImplementation =
-        read_json(&artifact_dir.join("sensor_implementation.json"))?;
-    plan.validate_for(&bundle.contract, &bundle.sensor_suite)
-        .map_err(|error| format!("Plano inválido: {error}"))?;
-    implementation
-        .validate_for(&bundle.sensor_suite)
-        .map_err(|error| format!("Sensores inválidos: {error}"))?;
-
+    let understanding: Understanding = read_json(&artifact_dir.join("understanding.json"))?;
     let run_workspace = state_root().join("runs").join(run_id).join("workspace");
-    let workspace_existed = run_workspace.is_dir();
-    if !workspace_existed {
-        workspace::copy_project(&workspace, &run_workspace, &[state_root()])
-            .map_err(|error| format!("Não foi possível preparar a cópia isolada: {error}"))?;
-    }
-    let sensor_dir = sensor_directory(run_id);
-    let lock = SensorLock::from_suite(&bundle.sensor_suite)?;
-    lock.verify(&bundle.sensor_suite)?;
     let mut events = EventLog::open(&artifact_dir, run_id)?;
     events.append(
         "run.resumed",
         serde_json::json!({"workspace": run_workspace.display().to_string()}),
     )?;
+
+    let implementation_path = artifact_dir.join("sensor_implementation.json");
+    let implementation: SensorImplementation = if implementation_path.is_file() {
+        let implementation: SensorImplementation = read_json(&implementation_path)?;
+        implementation
+            .validate_for(&bundle.sensor_suite)
+            .map_err(|error| format!("Sensores inválidos: {error}"))?;
+        implementation
+    } else {
+        println!("Sensores ainda não existem; recriando a suíte aprovada.");
+        let (implementation, sensor_dir) =
+            author_sensors(&workspace, &bundle, &understanding.locale, run_id)?;
+        save_sensor_manifest(&artifact_dir, run_id, &bundle, &implementation, &sensor_dir)?;
+        events.append(
+            "sensors.recovered",
+            serde_json::json!({"scripts": implementation.scripts.len()}),
+        )?;
+        implementation
+    };
+    let sensor_dir = sensor_directory(run_id);
+    if !sensor_dir.is_dir() {
+        let _ = fs::remove_dir_all(&sensor_dir);
+        ScriptSensorRunner::materialize(&implementation, &bundle.sensor_suite, &sensor_dir)
+            .map_err(|error| format!("Não foi possível materializar os sensores: {error}"))?;
+        events.append("sensors.materialized", serde_json::json!({}))?;
+    }
+
+    let plan_path = artifact_dir.join("plan.json");
+    let plan: Plan = if plan_path.is_file() {
+        let plan: Plan = read_json(&plan_path)?;
+        plan.validate_for(&bundle.contract, &bundle.sensor_suite)
+            .map_err(|error| format!("Plano inválido: {error}"))?;
+        plan
+    } else {
+        println!("Plano ainda não existe; recriando a partir do contrato aprovado.");
+        let mut planner = providers::planner()?;
+        let plan = planner
+            .plan(&workspace, &bundle, &understanding.locale)
+            .map_err(|error| format!("Planner não conseguiu produzir o plano: {error}"))?;
+        plan.validate_for(&bundle.contract, &bundle.sensor_suite)
+            .map_err(|error| format!("Plano inválido: {error}"))?;
+        fs::write(
+            &plan_path,
+            serde_json::to_vec_pretty(&plan).map_err(|error| error.to_string())?,
+        )?;
+        events.append(
+            "plan.recovered",
+            serde_json::json!({
+                "steps": plan.steps.iter().map(|step| step.id.clone()).collect::<Vec<_>>(),
+                "integration_step_id": plan.integration_step_id,
+            }),
+        )?;
+        plan
+    };
+
+    let workspace_existed = run_workspace.is_dir();
+    if !workspace_existed {
+        workspace::copy_project(&workspace, &run_workspace, &[state_root()])
+            .map_err(|error| format!("Não foi possível preparar a cópia isolada: {error}"))?;
+    }
+    let lock = SensorLock::from_suite(&bundle.sensor_suite)?;
+    lock.verify(&bundle.sensor_suite)?;
     let mut skip = if workspace_existed {
         events.completed_steps()
     } else {
@@ -953,6 +1003,16 @@ fn save_sensor_manifest(
 }
 
 fn new_run_id() -> String {
+    if let Ok(run_id) = std::env::var("HARNESS_RUN_ID") {
+        if !run_id.is_empty()
+            && run_id.len() <= 128
+            && run_id
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "-_".contains(character))
+        {
+            return run_id;
+        }
+    }
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())

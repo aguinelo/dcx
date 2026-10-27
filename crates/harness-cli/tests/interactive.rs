@@ -231,6 +231,16 @@ fn single_run_dir(project: &Path) -> PathBuf {
     runs[0].path()
 }
 
+fn run_resume(project: &Path, state: &Path, codex: &Path, run_id: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["resume", "--run", run_id])
+        .current_dir(project)
+        .env("HARNESS_CODEX_BIN", codex)
+        .env("HARNESS_STATE_DIR", state)
+        .output()
+        .expect("harness resume deve iniciar")
+}
+
 fn run_dispute(
     project: &Path,
     state: &Path,
@@ -387,6 +397,57 @@ fn blocking_question_is_answered_before_contract_approval() {
 }
 
 #[test]
+fn resume_rebuilds_missing_sensors_and_plan_from_the_approved_contract() {
+    let project = unique_dir("resume-partial");
+    let state_dir = unique_dir("resume-partial-state");
+    let codex = write_fake_codex(&project, &[CONTRACT]);
+
+    let output = run_request(&project, &state_dir, &codex, "tipo\ns\n");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let run = single_run_dir(&project);
+    let run_id = run
+        .file_name()
+        .expect("run id")
+        .to_string_lossy()
+        .to_string();
+    fs::remove_file(run.join("plan.json")).expect("remover plano");
+    fs::remove_file(run.join("sensor_implementation.json")).expect("remover implementação");
+    fs::remove_dir_all(state_dir.join("runs").join(&run_id).join("sensors"))
+        .expect("remover sensores materializados");
+    fs::remove_file(project.join("implemented.txt")).expect("restaurar baseline");
+
+    let output = run_resume(&project, &state_dir, &codex, &run_id);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Sensores ainda não existem"), "{stdout}");
+    assert!(stdout.contains("Plano ainda não existe"), "{stdout}");
+    assert!(stdout.contains("Execução concluída"), "{stdout}");
+    assert!(run.join("plan.json").is_file());
+    assert!(run.join("sensor_implementation.json").is_file());
+    assert!(
+        state_dir
+            .join("runs")
+            .join(&run_id)
+            .join("sensors")
+            .join("visible_organize_by_type.py")
+            .is_file()
+    );
+    let events = fs::read_to_string(run.join("events.jsonl")).expect("eventos");
+    assert!(events.contains("sensors.recovered"));
+    assert!(events.contains("plan.recovered"));
+}
+
+#[test]
 fn rejected_contract_keeps_previous_wording_and_revises() {
     let project = unique_dir("reject");
     let state_dir = unique_dir("reject-state");
@@ -459,4 +520,178 @@ fn rejected_contract_keeps_previous_wording_and_revises() {
             .expect("veredito JSON");
     assert_eq!(verdict["approved"], true);
     assert!(project.join("implemented.txt").is_file());
+}
+
+fn run_loop_start(
+    project: &Path,
+    state: &Path,
+    codex: &Path,
+    manifest: &Path,
+    max_model_calls: &str,
+) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["loop", "start", "--file"])
+        .arg(manifest)
+        .current_dir(project)
+        .env("HARNESS_CODEX_BIN", codex)
+        .env("HARNESS_STATE_DIR", state)
+        .env("HARNESS_LOOP_MAX_MODEL_CALLS", max_model_calls)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("harness loop start deve iniciar");
+    child
+        .stdin
+        .take()
+        .expect("stdin disponível")
+        .write_all(b"tipo\n")
+        .expect("responder pergunta bloqueante");
+    child.wait_with_output().expect("aguardar harness loop")
+}
+
+fn run_loop_status(project: &Path, state: &Path, id: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["loop", "status", "--id", id])
+        .current_dir(project)
+        .env("HARNESS_STATE_DIR", state)
+        .output()
+        .expect("harness loop status deve iniciar")
+}
+
+fn single_loop_state(project: &Path) -> serde_json::Value {
+    let loops = fs::read_dir(project.join(".harness").join("loops"))
+        .expect("diretório de filas")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("listar filas");
+    assert_eq!(loops.len(), 1);
+    serde_json::from_slice(&fs::read(loops[0].path()).expect("estado da fila"))
+        .expect("estado JSON")
+}
+
+#[test]
+fn loop_global_budget_pauses_after_model_call_limit() {
+    let project = unique_dir("loop-budget");
+    let state_dir = unique_dir("loop-budget-state");
+    let codex = write_fake_codex(&project, &[CONTRACT]);
+    let manifest = project.join("tasks.json");
+    fs::write(
+        &manifest,
+        r#"{"tasks":[{"id":"one","request":"Uma tarefa para testar o orçamento global."}]}"#,
+    )
+    .expect("manifesto da fila");
+
+    let output = run_loop_start(&project, &state_dir, &codex, &manifest, "1");
+    assert!(
+        !output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Fila pausada"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = single_loop_state(&project);
+    assert_eq!(state["schema_version"], 2);
+    assert_eq!(state["budget"]["max_model_calls"], 1);
+    assert_eq!(state["usage"]["model_calls"], 1);
+    assert_eq!(state["tasks"][0]["status"], "paused");
+    let error = state["tasks"][0]["error"].as_str().expect("erro da tarefa");
+    assert!(
+        error.contains("orçamento da fila"),
+        "erro inesperado: {error}"
+    );
+
+    let id = state["id"].as_str().expect("id da fila");
+    let status = run_loop_status(&project, &state_dir, id);
+    assert!(
+        status.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(stdout.contains("0/1 tarefa concluída"), "{stdout}");
+    assert!(
+        stdout.contains("Orçamento global: até 1 chamada"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("Uso: 1 chamada"), "{stdout}");
+    assert!(stdout.contains("[paused] one"), "{stdout}");
+    assert!(stdout.contains("orçamento da fila"), "{stdout}");
+}
+
+fn run_loop_resume(
+    project: &Path,
+    state: &Path,
+    codex: &Path,
+    id: &str,
+    max_model_calls: &str,
+    input: &str,
+) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["loop", "resume", "--id", id])
+        .current_dir(project)
+        .env("HARNESS_CODEX_BIN", codex)
+        .env("HARNESS_STATE_DIR", state)
+        .env("HARNESS_LOOP_MAX_MODEL_CALLS", max_model_calls)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("harness loop resume deve iniciar");
+    child
+        .stdin
+        .take()
+        .expect("stdin disponível")
+        .write_all(input.as_bytes())
+        .expect("responder gates");
+    child.wait_with_output().expect("aguardar harness loop")
+}
+
+#[test]
+fn loop_resume_can_replace_the_global_budget() {
+    let project = unique_dir("loop-resume-budget");
+    let state_dir = unique_dir("loop-resume-budget-state");
+    let codex = write_fake_codex(&project, &[CONTRACT]);
+    let manifest = project.join("tasks.json");
+    fs::write(
+        &manifest,
+        r#"{"tasks":[{"id":"one","request":"Uma tarefa para retomar com mais orçamento."}]}"#,
+    )
+    .expect("manifesto da fila");
+
+    let first = run_loop_start(&project, &state_dir, &codex, &manifest, "1");
+    assert!(!first.status.success());
+    let state = single_loop_state(&project);
+    let id = state["id"].as_str().expect("id da fila");
+    assert_eq!(state["usage"]["model_calls"], 1);
+
+    let resumed = run_loop_resume(&project, &state_dir, &codex, id, "20", "tipo\ns\n");
+    assert!(
+        resumed.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&resumed.stdout),
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+
+    let state = single_loop_state(&project);
+    assert_eq!(state["budget"]["max_model_calls"], 20);
+    assert_eq!(state["tasks"][0]["status"], "done");
+    assert!(
+        state["usage"]["model_calls"].as_u64().expect("chamadas") > 1,
+        "o uso global deve somar as chamadas da retomada"
+    );
+
+    let status = run_loop_status(&project, &state_dir, id);
+    assert!(status.status.success());
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(stdout.contains("1/1 tarefa concluída"), "{stdout}");
+    assert!(
+        stdout.contains("Orçamento global: até 20 chamadas"),
+        "{stdout}"
+    );
 }

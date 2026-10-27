@@ -106,6 +106,50 @@ export interface HarnessClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+interface EventStreamState {
+  since: number;
+  terminal: boolean;
+}
+
+async function readEventStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: HarnessEvent) => void,
+  initialSince: number,
+): Promise<EventStreamState> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let event = 'message';
+  let terminal = false;
+  let since = initialSince;
+  for (;;) {
+    let chunk: Awaited<ReturnType<typeof reader.read>>;
+    try {
+      chunk = await reader.read();
+    } catch {
+      break;
+    }
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const records = buffer.split('\n\n');
+    buffer = records.pop() ?? '';
+    for (const record of records) {
+      const eventLine = record.split('\n').find((line) => line.startsWith('event: '));
+      const dataLine = record.split('\n').find((line) => line.startsWith('data: '));
+      if (eventLine) event = eventLine.slice('event: '.length);
+      if (!dataLine) continue;
+      try {
+        since += 1;
+        onEvent({ event, data: JSON.parse(dataLine.slice('data: '.length)) });
+        if (event === 'done' || event === 'failed' || event === 'cancelled') terminal = true;
+      } catch {
+        // Ignore a malformed frame and keep the stream alive.
+      }
+    }
+  }
+  return { since, terminal };
+}
+
 /** Narrow HTTP/SSE client for the local Rust Harness daemon. */
 export class HarnessClient {
   private readonly baseUrl: string;
@@ -235,31 +279,27 @@ export class HarnessClient {
     onEvent: (event: HarnessEvent) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const response = await this.fetchImpl(
-      `${this.baseUrl}/runs/events?workspace=${encodeURIComponent(workspace)}&run_id=${encodeURIComponent(runId)}`,
-      signal ? { signal } : {},
-    );
-    if (!response.ok || !response.body) {
-      throw new Error(`Harness events HTTP ${response.status}`);
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let event = 'message';
+    let since = 0;
     for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const records = buffer.split('\n\n');
-      buffer = records.pop() ?? '';
-      for (const record of records) {
-        const eventLine = record.split('\n').find((line) => line.startsWith('event: '));
-        const dataLine = record.split('\n').find((line) => line.startsWith('data: '));
-        if (eventLine) event = eventLine.slice('event: '.length);
-        if (dataLine) {
-          onEvent({ event, data: JSON.parse(dataLine.slice('data: '.length)) });
-        }
+      if (signal?.aborted) return;
+      let response: Response;
+      try {
+        response = await this.fetchImpl(
+          `${this.baseUrl}/runs/events?workspace=${encodeURIComponent(workspace)}&run_id=${encodeURIComponent(runId)}&since=${since}`,
+          signal ? { signal } : {},
+        );
+      } catch {
+        if (signal?.aborted) return;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
       }
+      if (!response.ok || !response.body) {
+        throw new Error(`Harness events HTTP ${response.status}`);
+      }
+      const result = await readEventStream(response.body, onEvent, since);
+      since = result.since;
+      if (result.terminal || signal?.aborted) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
 

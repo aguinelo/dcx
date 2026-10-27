@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,10 @@ pub struct RunJob {
     pub request: String,
     pub status: String,
     pub created_at_unix_ms: u64,
+    #[serde(default)]
+    pub worker_pid: Option<u32>,
+    #[serde(default)]
+    pub restart_count: u8,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -34,16 +39,13 @@ pub fn enqueue(workspace: &Path, session_id: &str, request: &str) -> Result<RunJ
         request: request.to_owned(),
         status: "queued".to_owned(),
         created_at_unix_ms: now_ms(),
+        worker_pid: None,
+        restart_count: 0,
     };
     let directory = jobs_root(workspace);
     fs::create_dir_all(&directory)
         .map_err(|error| format!("não foi possível criar {}: {error}", directory.display()))?;
-    let path = directory.join(format!("{run_id}.json"));
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&job).map_err(|error| format!("job inválido: {error}"))?,
-    )
-    .map_err(|error| format!("não foi possível salvar job {}: {error}", path.display()))?;
+    write_job(workspace, &job)?;
     append_event(
         workspace,
         &run_id,
@@ -104,15 +106,49 @@ pub fn load(workspace: &Path, run_id: &str) -> Result<RunJob, String> {
 }
 
 pub fn set_status(workspace: &Path, run_id: &str, status: &str) -> Result<RunJob, String> {
+    let _guard = mutation_lock()
+        .lock()
+        .map_err(|_| "lock de jobs indisponível".to_owned())?;
     let mut job = load(workspace, run_id)?;
     job.status = status.to_owned();
-    let path = jobs_root(workspace).join(format!("{run_id}.json"));
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&job).map_err(|error| format!("job inválido: {error}"))?,
-    )
-    .map_err(|error| format!("não foi possível atualizar job: {error}"))?;
+    write_job(workspace, &job)?;
     Ok(job)
+}
+
+pub fn set_worker_pid(
+    workspace: &Path,
+    run_id: &str,
+    pid: Option<u32>,
+    increment_restart: bool,
+) -> Result<RunJob, String> {
+    let _guard = mutation_lock()
+        .lock()
+        .map_err(|_| "lock de jobs indisponível".to_owned())?;
+    let mut job = load(workspace, run_id)?;
+    job.worker_pid = pid;
+    if increment_restart {
+        job.restart_count = job.restart_count.saturating_add(1);
+    }
+    write_job(workspace, &job)?;
+    Ok(job)
+}
+
+fn write_job(workspace: &Path, job: &RunJob) -> Result<(), String> {
+    let path = jobs_root(workspace).join(format!("{}.json", job.run_id));
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(job).map_err(|error| format!("job inválido: {error}"))?,
+    )
+    .map_err(|error| format!("não foi possível salvar job temporário: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("não foi possível atualizar job {}: {error}", path.display()))?;
+    Ok(())
+}
+
+fn mutation_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn jobs_root(workspace: &Path) -> PathBuf {
@@ -137,6 +173,50 @@ mod tests {
         let loaded = load(&workspace, &job.run_id).expect("carregar");
         assert_eq!(loaded.status, "queued");
         assert_eq!(loaded.session_id, "chat-1");
+        assert_eq!(loaded.worker_pid, None);
+        assert_eq!(loaded.restart_count, 0);
+        fs::remove_dir_all(workspace).expect("limpar");
+    }
+
+    #[test]
+    fn worker_state_is_persisted_atomically() {
+        let workspace = std::env::temp_dir().join(format!("harness-job-worker-{}", now_ms()));
+        let job = enqueue(&workspace, "chat-1", "pedido").expect("enfileirar");
+        let updated =
+            set_worker_pid(&workspace, &job.run_id, Some(4321), true).expect("salvar worker");
+        assert_eq!(updated.worker_pid, Some(4321));
+        assert_eq!(updated.restart_count, 1);
+        let loaded = load(&workspace, &job.run_id).expect("carregar");
+        assert_eq!(loaded.worker_pid, Some(4321));
+        assert_eq!(loaded.restart_count, 1);
+        let temporary =
+            jobs_root(&workspace).join(format!("{}.{}.tmp", job.run_id, std::process::id()));
+        assert!(!temporary.exists());
+        fs::remove_dir_all(workspace).expect("limpar");
+    }
+
+    #[test]
+    fn jobs_saved_before_recovery_fields_still_load() {
+        let workspace = std::env::temp_dir().join(format!("harness-job-old-{}", now_ms()));
+        let directory = jobs_root(&workspace);
+        fs::create_dir_all(&directory).expect("criar diretório");
+        let path = directory.join("api-old.json");
+        fs::write(
+            &path,
+            r#"{
+              "schema_version": 1,
+              "run_id": "api-old",
+              "session_id": "chat-1",
+              "workspace": "/tmp/project",
+              "request": "pedido",
+              "status": "queued",
+              "created_at_unix_ms": 1
+            }"#,
+        )
+        .expect("salvar job antigo");
+        let loaded = load(&workspace, "api-old").expect("carregar");
+        assert_eq!(loaded.worker_pid, None);
+        assert_eq!(loaded.restart_count, 0);
         fs::remove_dir_all(workspace).expect("limpar");
     }
 }

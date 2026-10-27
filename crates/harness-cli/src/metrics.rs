@@ -26,6 +26,74 @@ struct Metrics {
 
 static METRICS: OnceLock<Mutex<Metrics>> = OnceLock::new();
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LoopLimits {
+    pub max_model_calls: Option<usize>,
+    pub max_cost_usd: Option<f64>,
+    pub max_duration: Option<Duration>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Usage {
+    pub model_calls: usize,
+    pub known_cost_usd: f64,
+    pub cost_complete: bool,
+    pub duration_ms: u64,
+}
+
+impl Default for Usage {
+    fn default() -> Self {
+        Self {
+            model_calls: 0,
+            known_cost_usd: 0.0,
+            cost_complete: true,
+            duration_ms: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct LoopBudgetState {
+    limits: LoopLimits,
+    usage: Usage,
+    active_started: Option<Instant>,
+}
+
+static LOOP_BUDGET: OnceLock<Mutex<Option<LoopBudgetState>>> = OnceLock::new();
+
+fn loop_budget() -> &'static Mutex<Option<LoopBudgetState>> {
+    LOOP_BUDGET.get_or_init(|| Mutex::new(None))
+}
+
+pub fn set_loop_budget(limits: LoopLimits, usage: Usage) -> Result<(), String> {
+    let mut guard = loop_budget()
+        .lock()
+        .map_err(|_| "orçamento da fila indisponível".to_owned())?;
+    *guard = Some(LoopBudgetState {
+        limits,
+        usage,
+        active_started: None,
+    });
+    Ok(())
+}
+
+pub fn loop_usage() -> Option<Usage> {
+    loop_budget()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.map(|state| state.usage))
+}
+
+pub fn clear_loop_budget() {
+    if let Ok(mut guard) = loop_budget().lock() {
+        *guard = None;
+    }
+}
+
+fn loop_budget_snapshot() -> Option<LoopBudgetState> {
+    loop_budget().lock().ok().and_then(|guard| *guard)
+}
+
 fn metrics() -> &'static Mutex<Metrics> {
     METRICS.get_or_init(|| {
         Mutex::new(Metrics {
@@ -88,7 +156,8 @@ pub fn before_call(provider: &str) -> Result<(), String> {
     if let Some(limit) = configured_usize("HARNESS_RUN_MAX_MODEL_CALLS")? {
         if guard.calls.len() >= limit {
             return Err(format!(
-                "limite de {limit} chamadas de modelo atingido; run interrompido"
+                "limite de {limit} {} de modelo atingido; run interrompido",
+                calls_label(limit)
             ));
         }
     }
@@ -124,7 +193,65 @@ pub fn before_call(provider: &str) -> Result<(), String> {
             ));
         }
     }
+    drop(guard);
+    check_loop_budget_before_call(provider)
+}
+
+fn check_loop_budget_before_call(provider: &str) -> Result<(), String> {
+    let mut guard = loop_budget()
+        .lock()
+        .map_err(|_| "orçamento da fila indisponível".to_owned())?;
+    let Some(state) = guard.as_mut() else {
+        return Ok(());
+    };
+    if let Some(limit) = state.limits.max_model_calls {
+        if state.usage.model_calls >= limit {
+            return Err(format!(
+                "orçamento da fila: limite de {limit} {} de modelo atingido",
+                calls_label(limit)
+            ));
+        }
+    }
+    if let Some(limit) = state.limits.max_cost_usd {
+        if provider == "codex" {
+            return Err(
+                "orçamento da fila com teto de custo exige provider com custo reportado; Codex não informa custo"
+                    .to_owned(),
+            );
+        }
+        if !state.usage.cost_complete {
+            return Err("orçamento da fila: uma chamada anterior não reportou custo".to_owned());
+        }
+        if state.usage.known_cost_usd >= limit {
+            return Err(format!(
+                "orçamento da fila: teto de custo de US$ {limit:.4} atingido (conhecido: US$ {:.4})",
+                state.usage.known_cost_usd
+            ));
+        }
+    }
+    if let Some(limit) = state.limits.max_duration {
+        if loop_duration_used(state) >= limit {
+            return Err(format!(
+                "orçamento da fila: limite de duração de {} minutos atingido",
+                limit.as_secs() / 60
+            ));
+        }
+    }
+    state.active_started = Some(Instant::now());
     Ok(())
+}
+
+fn calls_label(limit: usize) -> &'static str {
+    if limit == 1 { "chamada" } else { "chamadas" }
+}
+
+fn loop_duration_used(state: &LoopBudgetState) -> Duration {
+    Duration::from_millis(state.usage.duration_ms).saturating_add(
+        state
+            .active_started
+            .map(|started| started.elapsed())
+            .unwrap_or_default(),
+    )
 }
 
 pub fn run_provider_command(command: &mut Command, input: Option<&[u8]>) -> Result<Output, String> {
@@ -197,13 +324,27 @@ pub fn run_provider_command(command: &mut Command, input: Option<&[u8]>) -> Resu
 }
 
 fn remaining_duration() -> Result<Option<Duration>, String> {
-    let Some(limit) = configured_duration()? else {
-        return Ok(None);
+    let per_run = match configured_duration()? {
+        Some(limit) => {
+            let guard = metrics()
+                .lock()
+                .map_err(|_| "métricas indisponíveis".to_owned())?;
+            Some(limit.saturating_sub(guard.started.elapsed()))
+        }
+        None => None,
     };
-    let guard = metrics()
-        .lock()
-        .map_err(|_| "métricas indisponíveis".to_owned())?;
-    Ok(Some(limit.saturating_sub(guard.started.elapsed())))
+    let global = loop_budget_snapshot().and_then(|state| {
+        state
+            .limits
+            .max_duration
+            .map(|limit| limit.saturating_sub(loop_duration_used(&state)))
+    });
+    Ok(match (per_run, global) {
+        (Some(per_run), Some(global)) => Some(per_run.min(global)),
+        (Some(per_run), None) => Some(per_run),
+        (None, Some(global)) => Some(global),
+        (None, None) => None,
+    })
 }
 
 pub fn record(call: CallMetric) -> Result<(), String> {
@@ -212,6 +353,7 @@ pub fn record(call: CallMetric) -> Result<(), String> {
         .map_err(|_| "métricas indisponíveis".to_owned())?;
     guard.calls.push(call);
     write_locked(&guard)?;
+    record_loop_call(guard.calls.last().expect("chamada registrada"))?;
     if let Some(limit) = configured_f64("HARNESS_RUN_MAX_COST_USD")? {
         let latest = guard.calls.last().expect("chamada registrada");
         let spent = guard
@@ -235,6 +377,49 @@ pub fn record(call: CallMetric) -> Result<(), String> {
         if guard.started.elapsed() >= limit {
             return Err(format!(
                 "limite de duração de {} minutos atingido; run interrompido",
+                limit.as_secs() / 60
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn record_loop_call(call: &CallMetric) -> Result<(), String> {
+    let mut guard = loop_budget()
+        .lock()
+        .map_err(|_| "orçamento da fila indisponível".to_owned())?;
+    let Some(state) = guard.as_mut() else {
+        return Ok(());
+    };
+    state.active_started = None;
+    state.usage.model_calls += 1;
+    state.usage.duration_ms = state
+        .usage
+        .duration_ms
+        .saturating_add(u64::try_from(call.duration_ms).unwrap_or(u64::MAX));
+    if let Some(cost) = call.cost_usd {
+        state.usage.known_cost_usd += cost;
+    } else {
+        state.usage.cost_complete = false;
+    }
+    if let Some(limit) = state.limits.max_cost_usd {
+        if !state.usage.cost_complete {
+            return Err(
+                "orçamento da fila: provider não reportou custo da chamada; fila interrompida"
+                    .to_owned(),
+            );
+        }
+        if state.usage.known_cost_usd >= limit {
+            return Err(format!(
+                "orçamento da fila: teto de custo de US$ {limit:.4} atingido (conhecido: US$ {:.4}); fila interrompida",
+                state.usage.known_cost_usd
+            ));
+        }
+    }
+    if let Some(limit) = state.limits.max_duration {
+        if Duration::from_millis(state.usage.duration_ms) >= limit {
+            return Err(format!(
+                "orçamento da fila: limite de duração de {} minutos atingido; fila interrompida",
                 limit.as_secs() / 60
             ));
         }
@@ -341,4 +526,54 @@ fn now_ms() -> u64 {
 
 pub fn role_for_schema(schema_name: &str) -> String {
     schema_name.trim_end_matches(".schema.json").to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(cost_usd: Option<f64>) -> CallMetric {
+        CallMetric {
+            role: "test".to_owned(),
+            provider: "claude".to_owned(),
+            model: None,
+            duration_ms: 10,
+            cost_usd,
+            input_tokens: None,
+            output_tokens: None,
+        }
+    }
+
+    #[test]
+    fn loop_budget_enforces_calls_and_fails_closed_without_cost() {
+        reset();
+        set_loop_budget(
+            LoopLimits {
+                max_model_calls: Some(1),
+                ..LoopLimits::default()
+            },
+            Usage::default(),
+        )
+        .expect("orçamento");
+        before_call("claude").expect("primeira chamada permitida");
+        record(call(Some(0.01))).expect("registrar chamada");
+        assert!(before_call("claude").is_err());
+        assert_eq!(loop_usage().expect("uso").model_calls, 1);
+        clear_loop_budget();
+
+        reset();
+        set_loop_budget(
+            LoopLimits {
+                max_cost_usd: Some(1.0),
+                ..LoopLimits::default()
+            },
+            Usage::default(),
+        )
+        .expect("orçamento");
+        assert!(record(call(None)).is_err());
+        assert!(!loop_usage().expect("uso").cost_complete);
+        assert!(before_call("claude").is_err());
+        clear_loop_budget();
+        reset();
+    }
 }

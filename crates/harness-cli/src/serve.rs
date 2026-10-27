@@ -86,6 +86,9 @@ pub fn run(bind: &str) -> Result<(), String> {
     crate::scheduler::start();
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
+    if let Ok(workspace) = std::env::current_dir() {
+        crate::worker::recover(&workspace);
+    }
     println!("Harness serve ouvindo em http://{bind}");
     for stream in listener.incoming() {
         match stream {
@@ -455,12 +458,15 @@ fn handle_run_events(stream: &mut TcpStream, query: &str) -> Result<(), String> 
     let run_id =
         query_value(query, "run_id").ok_or("GET /runs/events exige &run_id=<id>".to_owned())?;
     let workspace = PathBuf::from(percent_decode(&workspace)?);
+    crate::worker::recover(&workspace);
     let run_id = percent_decode(&run_id)?;
+    let mut sent = query_value(query, "since")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
     stream
         .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
         .map_err(|error| error.to_string())?;
     let started = std::time::Instant::now();
-    let mut sent = 0;
     while started.elapsed() < std::time::Duration::from_secs(30) {
         let events = crate::jobs::events(&workspace, &run_id)?;
         for event in events.into_iter().skip(sent) {
@@ -549,6 +555,7 @@ fn handle_run_catalog(stream: &mut TcpStream, query: &str) -> Result<(), String>
     let workspace = query_value(query, "workspace")
         .ok_or("GET /runs/catalog exige ?workspace=<diretório>".to_owned())?;
     let workspace = PathBuf::from(percent_decode(&workspace)?);
+    crate::worker::recover(&workspace);
     let runs_root = workspace.join(".harness").join("runs");
     let mut runs = BTreeMap::<String, Value>::new();
     if let Ok(entries) = std::fs::read_dir(&runs_root) {

@@ -6,7 +6,7 @@ O Harness ajuda você a explorar um projeto, transformar uma ideia em uma tarefa
 
 - Conversar sobre um projeto e entender como ele funciona.
 - Pedir uma mudança e acompanhar o trabalho até a revisão.
-- Organizar vários pedidos em uma fila finita e retomá-la depois de uma interrupção.
+- Organizar vários pedidos em uma fila finita, acompanhar o orçamento global e retomá-la depois de uma interrupção.
 - Escolher o modelo usado e definir limites de tempo, chamadas e custo conhecido.
 - Usar o app desktop para conversar e acompanhar o projeto.
 
@@ -38,6 +38,8 @@ O Harness esclarece dúvidas e pede sua aprovação dos critérios antes de impl
 cargo run -p harness-cli -- resume --run ID_DO_RUN
 ```
 
+Se o app ou o daemon reiniciar durante um run, o Harness retoma o trabalho já salvo. Se o contrato ainda não estiver aprovado, a conversa recomeça e pede sua aprovação novamente.
+
 ## Rodar uma fila de tarefas
 
 Crie um arquivo `tasks.json` na pasta do projeto. Cada tarefa deve ter um identificador e um pedido:
@@ -57,13 +59,27 @@ Inicie a fila:
 cargo run -p harness-cli -- loop start --file tasks.json
 ```
 
-A fila executa os pedidos na ordem do arquivo e aceita até 25 tarefas. Se uma tarefa falhar ou o processo for interrompido, o terminal mostra um identificador. Use-o para continuar:
+A fila executa os pedidos na ordem do arquivo e aceita até 25 tarefas. Se uma tarefa falhar ou o processo for interrompido, o terminal mostra um identificador. Use-o para continuar. A fila também retoma após o reinício do daemon:
 
 ```sh
 cargo run -p harness-cli -- loop resume --id ID_DA_FILA
 ```
 
-O Harness preserva as aprovações: uma tarefa pode parar para pedir sua decisão. Os limites de custo e duração são aplicados separadamente a cada tarefa.
+O Harness preserva as aprovações: uma tarefa pode parar para pedir sua decisão.
+
+Para limitar a fila inteira, defina um orçamento global antes de iniciar:
+
+```env
+HARNESS_LOOP_MAX_MODEL_CALLS=80
+HARNESS_LOOP_MAX_COST_USD=4.00
+HARNESS_LOOP_MAX_DURATION_MINUTES=240
+```
+
+Os limites globais somam o uso de todas as tarefas e são combinados com os limites de cada tarefa. A fila pausa quando qualquer um for atingido. Ao retomar com essas variáveis, o orçamento salvo é substituído. Para acompanhar o andamento, o uso e o orçamento:
+
+```sh
+cargo run -p harness-cli -- loop status --id ID_DA_FILA
+```
 
 ## Escolher um modelo e definir limites
 
@@ -77,7 +93,7 @@ HARNESS_RUN_MAX_COST_USD=2.00
 HARNESS_RUN_MAX_DURATION_MINUTES=120
 ```
 
-Os limites valem para cada tarefa. O custo pode passar do teto pelo valor de uma chamada já iniciada, pois ele só é conhecido quando o modelo responde. Para usar um teto de custo, escolha um modelo que informe o custo; o Codex não fornece esse dado.
+Os limites por tarefa e os limites globais da fila são aplicados juntos. O custo pode passar do teto pelo valor de uma chamada já iniciada, pois ele só é conhecido quando o modelo responde. Para usar um teto de custo, escolha um modelo que informe o custo; o Codex não fornece esse dado.
 
 Para habilitar pesquisa na web durante a conversa, configure `HARNESS_CHAT_WEB=1` no `.env`. Sem essa opção, a conversa pesquisa apenas o projeto.
 
