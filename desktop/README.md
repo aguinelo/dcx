@@ -71,6 +71,26 @@ pnpm build
 Compila `src/**/*.ts` para `dist/` e copia os assets do renderer (HTML, CSS e
 as três fontes web em `.woff2`) para `dist/desktop/renderer/`.
 
+## Criar um app macOS instalável
+
+Em um Mac com Rust, Node 20+ e pnpm instalados:
+
+```bash
+pnpm install
+pnpm package:mac
+```
+
+O comando compila o CLI Rust em modo release, compila a interface e cria um
+DMG sem assinatura em `release/`. O `.app` inclui o executável `harness` e
+inicia o daemon local ao abrir, caso `http://127.0.0.1:8787` ainda não esteja
+respondendo. Se já houver um daemon nesse endereço, o desktop o reutiliza.
+
+Para usar outro daemon, defina `HARNESS_URL`; endpoints customizados não são
+iniciados nem encerrados pelo app. `HARNESS_BIN` escolhe explicitamente o CLI,
+e `HARNESS_MANAGE_DAEMON=0` desativa o gerenciamento automático. O DMG de
+desenvolvimento não é assinado nem notarizado pela Apple; para distribuir fora
+da máquina de build, configure identidade de Developer ID e notarização.
+
 ## O gate
 
 ```bash
@@ -103,7 +123,9 @@ só a biblioteca padrão, então ele compila e resolve sem dependência externa.
 ## Superfície da interface
 
 - `contextIsolation: true`, `nodeIntegration: false`.
-- O preload expõe apenas `run`, `cancel`, `context` e `onEvent`.
+- O preload expõe uma API IPC explícita para chat, sessões, workspaces, runs,
+  rotinas, terminal confirmado e configurações; não expõe acesso direto ao
+  filesystem do renderer.
 - O renderer **não** guarda estado: consome snapshots e eventos.
 - `src/desktop/renderer/mock.ts` e `simulation.ts` são o fallback explícito de
   modo demo — dados separados do renderer, para troca por dados reais.

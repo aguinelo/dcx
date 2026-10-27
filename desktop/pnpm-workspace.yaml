@@ -1,3 +1,5 @@
 allowBuilds:
-  '@biomejs/biome': set this to true or false
-  esbuild: set this to true or false
+  '@biomejs/biome': false
+  electron: true
+  electron-winstaller: false
+  esbuild: true

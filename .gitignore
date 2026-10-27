@@ -12,3 +12,4 @@ __pycache__/
 # Desktop adapter generated files
 desktop/node_modules/
 desktop/dist/
+/desktop/release/

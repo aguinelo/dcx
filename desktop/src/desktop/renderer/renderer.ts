@@ -31,6 +31,7 @@ interface ReplBridge {
   context(usedTokens: number): Promise<{ used: number; limit: number; percent: number }>;
   onEvent(fn: (payload: AgentEventPayload) => void): () => void;
   workspace(): Promise<string>;
+  pickWorkspace(): Promise<string | undefined>;
   sessions(
     workspace: string,
   ): Promise<Array<{ session_id: string; title: string; message_count: number; updated_at_unix_ms: number; pinned: boolean }>>;
@@ -113,6 +114,22 @@ let currentRoutineId: string | undefined;
 let currentRoutineIntervalHours: number | null = null;
 
 const CONTEXT_REPOS_KEY = 'harness.contextRepos';
+const WORKSPACES_KEY = 'harness.workspaces';
+
+function savedWorkspaces(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(WORKSPACES_KEY) ?? '[]') as unknown;
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveWorkspacePath(workspace: string): void {
+  const workspaces = savedWorkspaces().filter((entry) => entry !== workspace);
+  workspaces.unshift(workspace);
+  localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaces.slice(0, 30)));
+}
 
 function contextRepos(): Record<string, string[]> {
   try {
@@ -193,11 +210,13 @@ async function addContextRepo(): Promise<void> {
 }
 
 function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
+  const recent = savedWorkspaces().map((path) => ({ path }));
+  const combined = new Map([...projects, ...recent].map((project) => [project.path, project]));
   el('groups').replaceChildren(
     renderContextRepos(),
     projectSection({
       name: 'Workspaces',
-      items: projects.map((project) => ({
+      items: [...combined.values()].map((project) => ({
         title: project.path.replace(/\/+$/, '').split('/').pop() || project.path,
         workspacePath: project.path,
         active: project.path === currentWorkspace,
@@ -621,7 +640,8 @@ function projectSection(group: { name: string; items: Array<{ title: string; act
   const add = document.createElement('button');
   add.className = 'group__add';
   add.textContent = '+';
-  add.setAttribute('aria-label', 'Adicionar');
+  add.dataset.action = 'add-workspace';
+  add.setAttribute('aria-label', 'Adicionar workspace');
 
   title.append(label, add);
 
@@ -649,6 +669,7 @@ async function switchWorkspace(workspace: string): Promise<void> {
   void updateContext(0);
   try {
     localStorage.setItem('harness.workspace', workspace);
+    saveWorkspacePath(workspace);
   } catch {
     // Keep the selection for this window when storage is unavailable.
   }
@@ -1633,6 +1654,15 @@ document.addEventListener('click', (event) => {
   if (action === 'add-context-repo') {
     event.stopPropagation();
     void addContextRepo();
+    return;
+  }
+  if (action === 'add-workspace') {
+    event.stopPropagation();
+    void bridge.pickWorkspace().then((workspace) => {
+      if (workspace) return switchWorkspace(workspace);
+    }).catch((error: unknown) => {
+      showNotice('Não foi possível abrir o workspace', error instanceof Error ? error.message : String(error), true);
+    });
     return;
   }
   if (action === 'remove-context-repo') {

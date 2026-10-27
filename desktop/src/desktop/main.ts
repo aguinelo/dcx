@@ -1,17 +1,18 @@
-import { execFile } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import { access, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, Menu, app, dialog, ipcMain, shell } from 'electron';
 import { runAgent } from '../agent/loop.ts';
 import { PermissionGate } from '../agent/permissions.ts';
+import { HarnessClient } from '../harness/client.ts';
 import { createAnthropicProvider } from '../provider/anthropic.ts';
 import type { Provider } from '../provider/types.ts';
 import { DEMO_SCRIPT, createScriptedProvider } from '../testing/scripted.ts';
 import { ToolRegistry, defaultTools } from '../tools/registry.ts';
 import { PersistentShell } from '../tools/shell.ts';
 import type { ToolContext } from '../tools/types.ts';
-import { HarnessClient } from '../harness/client.ts';
+import { resolveHarnessCommand, shouldManageHarness } from './daemon.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rendererRoot = path.join(here, 'renderer');
@@ -24,6 +25,7 @@ let context: ToolContext | undefined;
 let registry: ToolRegistry | undefined;
 let abortController: AbortController | undefined;
 const terminalShells = new Map<string, PersistentShell>();
+let managedHarness: ChildProcess | undefined;
 
 function getHarnessWorkspace(): string {
   return process.env.HARNESS_WORKSPACE ?? app.getPath('home');
@@ -31,6 +33,60 @@ function getHarnessWorkspace(): string {
 
 function getHarnessClient(): HarnessClient {
   return new HarnessClient({ baseUrl: process.env.HARNESS_URL ?? 'http://127.0.0.1:8787' });
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function startHarnessIfNeeded(): Promise<void> {
+  if (process.env.REPL_SCRIPTED === '1' || !shouldManageHarness()) return;
+  try {
+    await getHarnessClient().health();
+    return;
+  } catch {
+    // Start the bundled/local daemon below when the default endpoint is down.
+  }
+
+  const command = resolveHarnessCommand({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    desktopRoot: path.resolve(here, '../..'),
+  });
+  try {
+    await access(command.command);
+  } catch {
+    throw new Error(
+      `Não encontrei o executável do Harness em ${command.command}. Compile com cargo ou configure HARNESS_BIN.`,
+    );
+  }
+
+  managedHarness = spawn(command.command, command.args, {
+    cwd: getHarnessWorkspace(),
+    env: process.env,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  managedHarness.on('error', (error) => {
+    console.error(`Falha ao iniciar o daemon Harness: ${error.message}`);
+  });
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (managedHarness.exitCode !== null) {
+      throw new Error(
+        `O daemon Harness encerrou durante a inicialização (código ${managedHarness.exitCode}).`,
+      );
+    }
+    try {
+      await getHarnessClient().health();
+      return;
+    } catch {
+      await delay(250);
+    }
+  }
+  managedHarness.kill('SIGTERM');
+  managedHarness = undefined;
+  throw new Error('O daemon Harness não respondeu em até 10 segundos.');
 }
 
 /** Shells out to the same `claude` CLI the chat provider uses, so the account
@@ -147,8 +203,20 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   buildMenu();
+  try {
+    await startHarnessIfNeeded();
+  } catch (error) {
+    console.error(error);
+    await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Harness indisponível',
+      message: 'Não foi possível iniciar o daemon local do Harness.',
+      detail: error instanceof Error ? error.message : String(error),
+      buttons: ['Continuar'],
+    });
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -160,6 +228,11 @@ app.on('window-all-closed', () => {
   for (const shellSession of terminalShells.values()) shellSession.close();
   terminalShells.clear();
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  managedHarness?.kill('SIGTERM');
+  managedHarness = undefined;
 });
 
 /**
@@ -326,6 +399,17 @@ ipcMain.handle('session:context', (_event, usedTokens: number) => {
 });
 
 ipcMain.handle('harness:workspace', () => getHarnessWorkspace());
+ipcMain.handle('harness:pickWorkspace', async () => {
+  const ownerWindow = mainWindow;
+  if (!ownerWindow) return undefined;
+  const picker = await dialog.showOpenDialog(ownerWindow, {
+    title: 'Abrir workspace',
+    buttonLabel: 'Abrir workspace',
+    properties: ['openDirectory'],
+  });
+  if (picker.canceled || !picker.filePaths[0]) return undefined;
+  return realpath(picker.filePaths[0]);
+});
 ipcMain.handle('harness:sessions', (_event, workspace: string) =>
   getHarnessClient().sessions(workspace),
 );

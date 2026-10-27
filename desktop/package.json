@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "node --import tsx --test 'tests/**/*.test.ts'",
+    "package:mac": "node tools/package-macos.mjs",
     "gen:protocol": "cd core && go run github.com/gzuidhof/tygo@v0.2.21 generate --config tygo.yaml",
     "check:protocol": "pnpm gen:protocol && { git diff --exit-code -- src/desktop/protocol/generated.ts || { echo 'src/desktop/protocol/generated.ts esta velho: rode pnpm gen:protocol'; exit 1; }; }",
     "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm gate:core",
@@ -27,8 +28,31 @@
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.10.5",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "build": {
+    "appId": "dev.harness.desktop",
+    "productName": "Harness",
+    "directories": {
+      "output": "release"
+    },
+    "files": ["dist/**/*", "package.json"],
+    "extraResources": [
+      {
+        "from": "../target/release/harness",
+        "to": "bin/harness"
+      }
+    ],
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "Harness-${version}-${arch}.${ext}"
+    }
   },
   "main": "dist/desktop/main.js"
 }
