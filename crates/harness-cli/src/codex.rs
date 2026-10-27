@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -349,18 +348,9 @@ fn invoke_codex<T: DeserializeOwned>(
         command.args(["--model", model]);
     }
 
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("não foi possível iniciar Codex CLI: {error}"))?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| "stdin do Codex CLI indisponível".to_owned())?
-        .write_all(prompt.as_bytes())
-        .map_err(|error| format!("falha ao enviar contexto ao Codex CLI: {error}"))?;
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("falha ao aguardar Codex CLI: {error}"))?;
+    metrics::before_call("codex")?;
+    let output = metrics::run_provider_command(&mut command, Some(prompt.as_bytes()))
+        .map_err(|error| format!("Codex CLI: {error}"))?;
     if !output.status.success() {
         let diagnostics = String::from_utf8_lossy(&output.stderr)
             .lines()
@@ -392,7 +382,7 @@ fn invoke_codex<T: DeserializeOwned>(
         cost_usd: None,
         input_tokens: None,
         output_tokens: None,
-    });
+    })?;
     Ok(parsed)
 }
 

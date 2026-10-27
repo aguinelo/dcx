@@ -155,10 +155,10 @@ impl ClaudeCli {
         configure_backend(&mut command, workspace, self.backend, model.as_deref())?;
         command.arg(prompt);
 
+        metrics::before_call(self.backend.provider_name())?;
         let started = Instant::now();
-        let output = command
-            .output()
-            .map_err(|error| format!("não foi possível iniciar Claude CLI: {error}"))?;
+        let output = metrics::run_provider_command(&mut command, None)
+            .map_err(|error| format!("Claude CLI: {error}"))?;
         if !output.status.success() {
             let diagnostics = String::from_utf8_lossy(&output.stderr)
                 .lines()
@@ -203,7 +203,7 @@ impl ClaudeCli {
             cost_usd: envelope["total_cost_usd"].as_f64(),
             input_tokens: envelope["usage"]["input_tokens"].as_u64(),
             output_tokens: envelope["usage"]["output_tokens"].as_u64(),
-        });
+        })?;
         Ok(parsed)
     }
 }

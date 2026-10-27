@@ -93,6 +93,8 @@ This transfers only the user's decisions into a new request. The analyst still a
 
 Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_PLANNER_MODEL` for the planner, and `HARNESS_VERIFIER_MODEL` for the verifier. With Codex, each falls back to `HARNESS_CODEX_MODEL` or the CLI default; with Claude, to `HARNESS_CLAUDE_MODEL`; with MiniMax, to `HARNESS_MINIMAX_MODEL` or `MiniMax-M3`. Set `HARNESS_CLAUDE_BIN` to override the Claude executable.
 
+Runs can be bounded for unattended or overnight use with optional environment limits: `HARNESS_RUN_MAX_MODEL_CALLS` caps provider calls, `HARNESS_RUN_MAX_COST_USD` caps known provider spend, and `HARNESS_RUN_MAX_DURATION_MINUTES` caps elapsed run time. Limits are checked between model calls and after each completed call; a call already in progress can exceed the cost ceiling before the Harness receives its reported cost. A configured cost ceiling fails closed if the provider does not report cost, including Codex. These limits bound one run; they do not automatically approve contracts, select follow-up tasks, or run an unbounded queue. Human approval gates remain active.
+
 ## Ambiente e segredos
 
 `harness` carrega `.env` do diretório atual antes de ler a configuração; `harness chat --workspace <dir>` também carrega o `.env` daquele projeto. Use `HARNESS_ENV_FILE=<arquivo>` para apontar outro arquivo explicitamente. As chaves e configurações de provider lidas do `.env` são aplicadas diretamente aos processos do Claude/MiniMax, então não precisam ser exportadas no shell.

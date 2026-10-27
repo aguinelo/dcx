@@ -58,6 +58,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
         &revisions,
         lifecycle.history(),
     )?;
+    metrics::set_output_path(&artifact_dir.join("metrics.json"))?;
     println!(
         "\nContrato aprovado. Artefatos salvos em {}",
         artifact_dir.display()
@@ -189,7 +190,6 @@ pub fn run(request: &str) -> InteractiveResult<()> {
 
 pub fn resume(run_id: &str) -> InteractiveResult<()> {
     validate_run_id(run_id)?;
-    metrics::reset();
     let workspace = std::env::current_dir()?;
     let _lock = ProjectLock::acquire(&workspace)?;
     let artifact_dir = workspace.join(".harness").join("runs").join(run_id);
@@ -201,6 +201,7 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
         )
         .into());
     }
+    metrics::resume_from(&artifact_dir.join("metrics.json"))?;
     let bundle: ContractBundle = read_json(&artifact_dir.join("contract_bundle.json"))?;
     let plan: Plan = read_json(&artifact_dir.join("plan.json"))?;
     let implementation: SensorImplementation =
@@ -285,7 +286,6 @@ pub fn resume(run_id: &str) -> InteractiveResult<()> {
 
 pub fn dispute(run_id: &str, sensor_id: &str, reason: &str) -> InteractiveResult<()> {
     validate_run_id(run_id)?;
-    metrics::reset();
     if sensor_id.trim().is_empty() || reason.trim().is_empty() {
         return Err("Informe run, sensor e motivo da disputa.".into());
     }
@@ -300,6 +300,7 @@ pub fn dispute(run_id: &str, sensor_id: &str, reason: &str) -> InteractiveResult
         )
         .into());
     }
+    metrics::resume_from(&artifact_dir.join("metrics.json"))?;
     let mut bundle: ContractBundle = read_json(&artifact_dir.join("contract_bundle.json"))?;
     let mut implementation: SensorImplementation =
         read_json(&artifact_dir.join("sensor_implementation.json"))?;
