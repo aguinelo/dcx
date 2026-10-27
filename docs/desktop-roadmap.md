@@ -11,7 +11,7 @@ de conversa e execução.
 | 1. Sessões confiáveis | Concluída | Criar uma conversa nova não reutiliza a sessão anterior; removido o fluxo de simulação que confundia o estado real. |
 | 2. Dados reais de trabalho | Concluída | Alterações mostra PRs reais via `gh`; tarefas em segundo plano acompanham runs do Harness e podem ser canceladas. |
 | 3. Troca de workspace | Concluída | Itens locais em Workspaces são selecionáveis; histórico, configurações e conversas passam a usar o projeto escolhido; seleção persiste entre aberturas. |
-| 4. Ferramentas da interface | Em andamento | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON e busca local nas mensagens do workspace. Ainda faltam Rotinas. |
+| 4. Ferramentas da interface | Em andamento | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON, busca local e biblioteca de instruções reutilizáveis. Agendamento automático de rotinas ainda falta. |
 | 5. Distribuição | Depois | Empacotar como aplicativo macOS instalável, com ícone, configuração do daemon e atualização/build reproduzível. |
 
 ## Critérios de conclusão
@@ -21,6 +21,7 @@ de conversa e execução.
 - Trocar de workspace recarrega a lista de sessões e não mistura mensagens entre projetos.
 - O terminal executa no workspace selecionado, pede confirmação antes de cada comando e encerra a sessão se um comando exceder o timeout.
 - A busca encontra mensagens apenas no workspace atual e abre a conversa correspondente sem enviar conteúdo para um provedor.
+- Rotinas são persistidas por workspace; usar uma rotina prepara uma conversa nova e não envia nada antes de revisão e envio pelo usuário.
 - A interface não apresenta dados simulados como se fossem dados reais.
 - `cd desktop && npm run typecheck && npm run build` passa antes de cada entrega.
 
@@ -49,3 +50,5 @@ deve apontar para o workspace selecionado. Cada comando exige confirmação; `�
 reinicia o shell, e comandos que excedem 60 segundos encerram a sessão do shell.
 
 Para validar **Artefatos**, abra a seção e selecione um run e um arquivo JSON para conferir o conteúdo. Para validar **Procurar**, busque uma palavra de uma conversa existente no workspace, confira o trecho e abra o resultado.
+
+Para validar **Rotinas**, crie uma instrução, salve, selecione-a novamente e clique em **Usar na conversa**. O texto deve aparecer no composer de uma conversa nova para revisão antes do envio.

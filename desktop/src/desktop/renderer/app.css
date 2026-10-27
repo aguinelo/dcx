@@ -475,6 +475,26 @@ button {
 .session-search-result strong { font-size: var(--fs-body-sm); font-weight: 600; }
 .session-search-result span { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: var(--fs-caption); line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .session-search-result small { color: var(--muted); font-size: var(--fs-caption); }
+.routines-view { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.routines-view[hidden] { display: none; }
+.routines-view__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 28px; border-bottom: 1px solid var(--border); }
+.routines-view__head h1 { margin: 0; font-size: var(--fs-prose); }
+.routines-view__head p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-caption); }
+.routines-view__content { display: grid; grid-template-columns: minmax(190px, 30%) minmax(0, 1fr); flex: 1; min-height: 0; }
+.routines-view__list { overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); }
+.routines-view__list ul { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.routine-item { width: 100%; padding: 11px; border-radius: var(--radius-sm); text-align: left; color: var(--text); }
+.routine-item:hover, .routine-item.is-active { background: var(--bg-hover); }
+.routine-item strong, .routine-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.routine-item strong { font-size: var(--fs-body-sm); font-weight: var(--fw-medium); }
+.routine-item span { margin-top: 4px; color: var(--muted); font-size: var(--fs-caption); }
+.routine-editor { display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow-y: auto; padding: 24px; }
+.routine-editor label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-caption); color: var(--muted); }
+.routine-editor input:not([type="hidden"]), .routine-editor textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-subtle); font: inherit; }
+.routine-editor textarea { resize: vertical; min-height: 180px; font-size: var(--fs-entry); line-height: var(--lh-entry); }
+.routine-editor__hint { margin: 0; color: var(--muted); font-size: var(--fs-caption); line-height: 1.5; }
+.routine-editor__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn--danger { color: var(--danger); }
 .chat__scroll {
   flex: 1;
   overflow-y: auto;

@@ -38,7 +38,7 @@
           <button class="navitem navitem--strong" data-action="new"><span class="glyph">+</span><span>Criar</span></button>
         <button class="navitem" data-action="search"><span class="glyph">⌕</span><span>Procurar</span></button>
           <button class="navitem" data-action="artifacts"><span class="glyph">▧</span><span>Artefatos</span></button>
-          <button class="navitem"><span class="glyph">◴</span><span>Rotinas</span></button>
+          <button class="navitem" data-action="routines"><span class="glyph">◴</span><span>Rotinas</span></button>
           <button class="navitem"><span class="glyph">◑</span><span>Personalização</span></button>
           <button class="navitem"><span class="glyph">⋯</span><span>Mais</span></button>
         </nav>
@@ -95,6 +95,30 @@
           </header>
           <label class="search-view__field"><span>⌕</span><input id="session-search-input" type="search" placeholder="Buscar nas conversas" autocomplete="off" /></label>
           <ul class="search-view__results" id="session-search-results"><li class="artifacts-view__empty">Digite pelo menos 2 caracteres.</li></ul>
+        </section>
+        <section class="routines-view" id="routines-view" hidden aria-label="Rotinas reutilizáveis">
+          <header class="routines-view__head">
+            <div><h1>Rotinas</h1><p>Instruções salvas neste workspace. Revise no composer antes de enviar.</p></div>
+            <div class="artifacts-view__actions">
+              <button class="btn" data-action="new-routine">Nova rotina</button>
+              <button class="iconbtn" data-action="close-routines" title="Voltar à conversa">✕</button>
+            </div>
+          </header>
+          <div class="routines-view__content">
+            <aside class="routines-view__list"><ul id="routine-list"></ul></aside>
+            <form class="routine-editor" id="routine-editor">
+              <input id="routine-id" type="hidden" />
+              <label>Nome<input id="routine-title" maxlength="100" required placeholder="Ex.: Revisar um pull request" /></label>
+              <label>Instruções<textarea id="routine-prompt" maxlength="12000" rows="10" required placeholder="Descreva o que o assistente deve fazer quando você usar esta rotina."></textarea></label>
+              <p class="routine-editor__hint">Usar uma rotina abre uma conversa nova e preenche o composer. Nada é enviado até você revisar e enviar.</p>
+              <p class="routine-editor__hint" id="routine-feedback" role="status" aria-live="polite" hidden></p>
+              <div class="routine-editor__actions">
+                <button class="btn" type="submit">Salvar rotina</button>
+                <button class="btn" type="button" data-action="use-routine">Usar na conversa</button>
+                <button class="btn btn--danger" type="button" data-action="delete-routine" hidden>Remover</button>
+              </div>
+            </form>
+          </div>
         </section>
         <div class="chat__scroll" id="thread">
           <div class="thread" id="thread-inner"></div>

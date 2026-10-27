@@ -58,6 +58,14 @@ export interface HarnessSessionSearchResult {
   updated_at_unix_ms: number;
 }
 
+export interface HarnessRoutine {
+  id: string;
+  title: string;
+  prompt: string;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+}
+
 export interface HarnessEvent {
   event: string;
   data: Record<string, unknown>;
@@ -151,6 +159,18 @@ export class HarnessClient {
     return this.get(
       `/sessions/search?workspace=${encodeURIComponent(workspace)}&q=${encodeURIComponent(query)}`,
     );
+  }
+
+  async routines(workspace: string): Promise<{ routines: HarnessRoutine[] }> {
+    return this.get(`/routines?workspace=${encodeURIComponent(workspace)}`);
+  }
+
+  async saveRoutine(workspace: string, routine: { id?: string; title: string; prompt: string }): Promise<HarnessRoutine> {
+    return this.post('/routines', { workspace, ...routine });
+  }
+
+  async deleteRoutine(workspace: string, id: string): Promise<{ id: string; deleted: boolean }> {
+    return this.post('/routines/delete', { workspace, id });
   }
 
   async setPinned(workspace: string, sessionId: string, pinned: boolean): Promise<{ pinned: boolean }> {

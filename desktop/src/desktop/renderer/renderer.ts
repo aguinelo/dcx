@@ -57,6 +57,9 @@ interface ReplBridge {
   runCatalog(workspace: string): Promise<{ runs: Array<{ run_id: string; title: string; summary: string; status: string; criteria_passed: number | null; criteria_total: number | null; states: string[]; files: string[] }> }>;
   artifact(workspace: string, runId: string, name: string): Promise<{ name: string; content: string }>;
   searchSessions(workspace: string, query: string): Promise<{ results: Array<{ session_id: string; title: string; snippet: string; role: string; updated_at_unix_ms: number }> }>;
+  routines(workspace: string): Promise<{ routines: Array<{ id: string; title: string; prompt: string; created_at_unix_ms: number; updated_at_unix_ms: number }> }>;
+  saveRoutine(workspace: string, routine: { id?: string; title: string; prompt: string }): Promise<{ id: string; title: string; prompt: string; created_at_unix_ms: number; updated_at_unix_ms: number }>;
+  deleteRoutine(workspace: string, id: string): Promise<{ id: string; deleted: boolean }>;
   config(workspace: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   setConfig(
     workspace: string,
@@ -106,6 +109,7 @@ let currentProjects: Array<{ path: string }> = [];
 let terminalWorkspaceDisplayed = '';
 let selectedArtifactRun: string | undefined;
 let searchSequence = 0;
+let currentRoutineId: string | undefined;
 
 const CONTEXT_REPOS_KEY = 'harness.contextRepos';
 
@@ -203,12 +207,14 @@ function renderWorkspaceGroups(projects: Array<{ path: string }> = []): void {
 
 async function openArtifacts(): Promise<void> {
   el<HTMLElement>('search-view').hidden = true;
+  el<HTMLElement>('routines-view').hidden = true;
   el<HTMLElement>('artifacts-view').hidden = false;
   await loadArtifactCatalog();
 }
 
 function openSearch(): void {
   el<HTMLElement>('artifacts-view').hidden = true;
+  el<HTMLElement>('routines-view').hidden = true;
   el<HTMLElement>('search-view').hidden = false;
   const input = el<HTMLInputElement>('session-search-input');
   input.focus();
@@ -263,6 +269,115 @@ async function searchSessions(query: string): Promise<void> {
     empty.textContent = error instanceof Error ? error.message : String(error);
     list.replaceChildren(empty);
   }
+}
+
+async function loadRoutines(selectedId = currentRoutineId): Promise<void> {
+  const list = el<HTMLUListElement>('routine-list');
+  list.replaceChildren();
+  try {
+    const { routines } = await bridge.routines(currentWorkspace);
+    if (routines.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'artifacts-view__empty';
+      empty.textContent = 'Nenhuma rotina salva neste workspace.';
+      list.append(empty);
+      currentRoutineId = undefined;
+      return;
+    }
+    for (const routine of routines) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.className = `routine-item${routine.id === selectedId ? ' is-active' : ''}`;
+      button.dataset.action = 'select-routine';
+      button.dataset.routineId = routine.id;
+      const title = document.createElement('strong');
+      title.textContent = routine.title;
+      const excerpt = document.createElement('span');
+      excerpt.textContent = routine.prompt;
+      button.append(title, excerpt);
+      item.append(button);
+      list.append(item);
+    }
+    const routine = routines.find((item) => item.id === selectedId) ?? routines[0]!;
+    setRoutineEditor(routine);
+  } catch (error) {
+    const empty = document.createElement('li');
+    empty.className = 'artifacts-view__empty';
+    empty.textContent = error instanceof Error ? error.message : String(error);
+    list.append(empty);
+  }
+}
+
+function setRoutineEditor(routine?: { id: string; title: string; prompt: string }): void {
+  currentRoutineId = routine?.id;
+  el<HTMLInputElement>('routine-id').value = routine?.id ?? '';
+  el<HTMLInputElement>('routine-title').value = routine?.title ?? '';
+  el<HTMLTextAreaElement>('routine-prompt').value = routine?.prompt ?? '';
+  el<HTMLFormElement>('routine-editor').querySelector<HTMLButtonElement>('[data-action="delete-routine"]')!.hidden = !routine;
+  el<HTMLElement>('routine-feedback').hidden = true;
+  el<HTMLElement>('routine-feedback').textContent = '';
+  document.querySelectorAll<HTMLElement>('.routine-item').forEach((node) => {
+    node.classList.toggle('is-active', node.dataset.routineId === routine?.id);
+  });
+}
+
+function openRoutines(): void {
+  el<HTMLDivElement>('notice').hidden = true;
+  el<HTMLElement>('search-view').hidden = true;
+  el<HTMLElement>('artifacts-view').hidden = true;
+  el<HTMLElement>('routines-view').hidden = false;
+  void loadRoutines();
+}
+
+async function saveCurrentRoutine(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  const title = el<HTMLInputElement>('routine-title').value.trim();
+  const prompt = el<HTMLTextAreaElement>('routine-prompt').value.trim();
+  if (!title || !prompt) return;
+  try {
+    const saved = await bridge.saveRoutine(currentWorkspace, {
+      ...(currentRoutineId ? { id: currentRoutineId } : {}),
+      title,
+      prompt,
+    });
+    currentRoutineId = saved.id;
+    await loadRoutines(saved.id);
+    el<HTMLElement>('routine-feedback').textContent = `“${saved.title}” foi salva neste workspace.`;
+    el<HTMLElement>('routine-feedback').hidden = false;
+  } catch (error) {
+    el<HTMLElement>('routine-feedback').textContent = error instanceof Error ? error.message : String(error);
+    el<HTMLElement>('routine-feedback').hidden = false;
+  }
+}
+
+async function deleteCurrentRoutine(): Promise<void> {
+  if (!currentRoutineId) return;
+  const title = el<HTMLInputElement>('routine-title').value || 'esta rotina';
+  if (!window.confirm(`Remover “${title}” deste workspace?`)) return;
+  try {
+    await bridge.deleteRoutine(currentWorkspace, currentRoutineId);
+    currentRoutineId = undefined;
+    setRoutineEditor();
+    await loadRoutines();
+  } catch (error) {
+    showNotice('Não foi possível remover a rotina', error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+function useCurrentRoutine(): void {
+  const prompt = el<HTMLTextAreaElement>('routine-prompt').value.trim();
+  if (!prompt) return;
+  thread.replaceChildren();
+  currentSessionId = undefined;
+  accumulatedTokens = 0;
+  lastUsageTotals = { messages: 0, cacheCreate: 0, output: 0 };
+  void updateContext(0);
+  el<HTMLButtonElement>('promote-run').hidden = true;
+  document.querySelectorAll('[data-session-id].is-active').forEach((node) => node.classList.remove('is-active'));
+  el<HTMLElement>('routines-view').hidden = true;
+  input.value = prompt;
+  autoGrow();
+  input.focus();
 }
 
 async function loadArtifactCatalog(): Promise<void> {
@@ -1353,6 +1468,10 @@ async function submit(): Promise<void> {
 
 input.addEventListener('input', autoGrow);
 
+el<HTMLFormElement>('routine-editor').addEventListener('submit', (event) => {
+  void saveCurrentRoutine(event);
+});
+
 el<HTMLFormElement>('terminal-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const terminalInput = el<HTMLInputElement>('terminal-input');
@@ -1375,6 +1494,16 @@ function handleChromeAction(action: string): void {
   switch (action) {
     case 'search':
       openSearch();
+      return;
+    case 'routines':
+      openRoutines();
+      return;
+    case 'close-routines':
+      el<HTMLElement>('routines-view').hidden = true;
+      return;
+    case 'new-routine':
+      setRoutineEditor();
+      el<HTMLInputElement>('routine-title').focus();
       return;
     case 'close-search':
       el<HTMLElement>('search-view').hidden = true;
@@ -1429,6 +1558,9 @@ function handleChromeAction(action: string): void {
       void promoteCurrentSession();
       return;
     case 'new':
+      el<HTMLElement>('search-view').hidden = true;
+      el<HTMLElement>('artifacts-view').hidden = true;
+      el<HTMLElement>('routines-view').hidden = true;
       thread.replaceChildren();
       currentSessionId = undefined;
       accumulatedTokens = 0;
@@ -1498,6 +1630,24 @@ document.addEventListener('click', (event) => {
       el<HTMLElement>('search-view').hidden = true;
       void loadSession(currentWorkspace, sessionId);
     }
+    return;
+  }
+  if (action === 'select-routine') {
+    const id = target.closest<HTMLElement>('[data-action="select-routine"]')?.dataset.routineId;
+    if (id) {
+      void bridge.routines(currentWorkspace).then(({ routines }) => {
+        const selected = routines.find((routine) => routine.id === id);
+        if (selected) setRoutineEditor(selected);
+      });
+    }
+    return;
+  }
+  if (action === 'use-routine') {
+    useCurrentRoutine();
+    return;
+  }
+  if (action === 'delete-routine') {
+    void deleteCurrentRoutine();
     return;
   }
 
@@ -1582,6 +1732,7 @@ async function loadHarnessData(workspaceOverride?: string): Promise<void> {
     if (!el<HTMLElement>('search-view').hidden) {
       void searchSessions(el<HTMLInputElement>('session-search-input').value);
     }
+    if (!el<HTMLElement>('routines-view').hidden) void loadRoutines();
   } catch (error) {
     el('connection-state').textContent = 'Harness offline';
     showNotice('Harness indisponível', error instanceof Error ? error.message : String(error), true);

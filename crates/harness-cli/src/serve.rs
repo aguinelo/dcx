@@ -66,6 +66,20 @@ struct SetConfigRequest {
     max_tool_calls: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SaveRoutineRequest {
+    workspace: String,
+    id: Option<String>,
+    title: String,
+    prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteRoutineRequest {
+    workspace: String,
+    id: String,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
@@ -135,6 +149,9 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/health") => respond_json(&mut stream, 200, r#"{"status":"ok"}"#),
         ("GET", "/sessions") => handle_sessions(&mut stream, query),
         ("GET", "/sessions/search") => handle_session_search(&mut stream, query),
+        ("GET", "/routines") => handle_routines(&mut stream, query),
+        ("POST", "/routines") => handle_save_routine(&mut stream, body),
+        ("POST", "/routines/delete") => handle_delete_routine(&mut stream, body),
         ("POST", "/sessions/pin") => handle_set_pinned(&mut stream, body),
         ("GET", "/session") => handle_session(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
@@ -229,6 +246,45 @@ fn search_excerpt(content: &str, term: &str) -> String {
         excerpt.push('…');
     }
     excerpt
+}
+
+fn handle_routines(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .ok_or("GET /routines exige ?workspace=<diretório>".to_owned())?;
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    let routines = crate::routines::list(&workspace)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"routines": routines}).to_string(),
+    )
+}
+
+fn handle_save_routine(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: SaveRoutineRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let routine = crate::routines::save(
+        Path::new(&request.workspace),
+        request.id.as_deref(),
+        &request.title,
+        &request.prompt,
+    )?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::to_string(&routine).map_err(|e| e.to_string())?,
+    )
+}
+
+fn handle_delete_routine(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: DeleteRoutineRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    crate::routines::delete(Path::new(&request.workspace), &request.id)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"id": request.id, "deleted": true}).to_string(),
+    )
 }
 
 fn handle_set_pinned(stream: &mut TcpStream, body: &str) -> Result<(), String> {

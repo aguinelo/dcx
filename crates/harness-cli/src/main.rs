@@ -9,6 +9,7 @@ mod jobs;
 mod lock;
 mod metrics;
 mod providers;
+mod routines;
 mod schemas;
 mod serve;
 mod state;
