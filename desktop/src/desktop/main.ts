@@ -350,7 +350,7 @@ ipcMain.handle('harness:runCatalog', (_event, workspace: string) => getHarnessCl
 ipcMain.handle('harness:artifact', (_event, workspace: string, runId: string, name: string) => getHarnessClient().artifact(workspace, runId, name));
 ipcMain.handle('harness:searchSessions', (_event, workspace: string, query: string) => getHarnessClient().searchSessions(workspace, query));
 ipcMain.handle('harness:routines', (_event, workspace: string) => getHarnessClient().routines(workspace));
-ipcMain.handle('harness:saveRoutine', (_event, workspace: string, routine: { id?: string; title: string; prompt: string }) => getHarnessClient().saveRoutine(workspace, routine));
+ipcMain.handle('harness:saveRoutine', (_event, workspace: string, routine: { id?: string; title: string; prompt: string; interval_hours: number | null }) => getHarnessClient().saveRoutine(workspace, routine));
 ipcMain.handle('harness:deleteRoutine', (_event, workspace: string, id: string) => getHarnessClient().deleteRoutine(workspace, id));
 
 ipcMain.handle('auth:status', async () => {

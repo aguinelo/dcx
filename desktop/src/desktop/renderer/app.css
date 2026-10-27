@@ -490,7 +490,7 @@ button {
 .routine-item span { margin-top: 4px; color: var(--muted); font-size: var(--fs-caption); }
 .routine-editor { display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow-y: auto; padding: 24px; }
 .routine-editor label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-caption); color: var(--muted); }
-.routine-editor input:not([type="hidden"]), .routine-editor textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-subtle); font: inherit; }
+.routine-editor input:not([type="hidden"]), .routine-editor textarea, .routine-editor select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--bg-raised); font: inherit; }
 .routine-editor textarea { resize: vertical; min-height: 180px; font-size: var(--fs-entry); line-height: var(--lh-entry); }
 .routine-editor__hint { margin: 0; color: var(--muted); font-size: var(--fs-caption); line-height: 1.5; }
 .routine-editor__actions { display: flex; flex-wrap: wrap; gap: 8px; }

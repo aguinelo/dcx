@@ -57,8 +57,8 @@ interface ReplBridge {
   runCatalog(workspace: string): Promise<{ runs: Array<{ run_id: string; title: string; summary: string; status: string; criteria_passed: number | null; criteria_total: number | null; states: string[]; files: string[] }> }>;
   artifact(workspace: string, runId: string, name: string): Promise<{ name: string; content: string }>;
   searchSessions(workspace: string, query: string): Promise<{ results: Array<{ session_id: string; title: string; snippet: string; role: string; updated_at_unix_ms: number }> }>;
-  routines(workspace: string): Promise<{ routines: Array<{ id: string; title: string; prompt: string; created_at_unix_ms: number; updated_at_unix_ms: number }> }>;
-  saveRoutine(workspace: string, routine: { id?: string; title: string; prompt: string }): Promise<{ id: string; title: string; prompt: string; created_at_unix_ms: number; updated_at_unix_ms: number }>;
+  routines(workspace: string): Promise<{ routines: Array<{ id: string; title: string; prompt: string; created_at_unix_ms: number; updated_at_unix_ms: number; interval_hours: number | null; next_run_at_unix_ms: number | null; last_run_at_unix_ms: number | null; last_run_status: string | null; last_run_error: string | null; last_cost_usd: number | null }> }>;
+  saveRoutine(workspace: string, routine: { id?: string; title: string; prompt: string; interval_hours: number | null }): Promise<{ id: string; title: string; prompt: string; created_at_unix_ms: number; updated_at_unix_ms: number; interval_hours: number | null; next_run_at_unix_ms: number | null; last_run_at_unix_ms: number | null; last_run_status: string | null; last_run_error: string | null; last_cost_usd: number | null }>;
   deleteRoutine(workspace: string, id: string): Promise<{ id: string; deleted: boolean }>;
   config(workspace: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   setConfig(
@@ -110,6 +110,7 @@ let terminalWorkspaceDisplayed = '';
 let selectedArtifactRun: string | undefined;
 let searchSequence = 0;
 let currentRoutineId: string | undefined;
+let currentRoutineIntervalHours: number | null = null;
 
 const CONTEXT_REPOS_KEY = 'harness.contextRepos';
 
@@ -271,7 +272,7 @@ async function searchSessions(query: string): Promise<void> {
   }
 }
 
-async function loadRoutines(selectedId = currentRoutineId): Promise<void> {
+async function loadRoutines(selectedId = currentRoutineId, syncEditor = true): Promise<void> {
   const list = el<HTMLUListElement>('routine-list');
   list.replaceChildren();
   try {
@@ -295,11 +296,26 @@ async function loadRoutines(selectedId = currentRoutineId): Promise<void> {
       const excerpt = document.createElement('span');
       excerpt.textContent = routine.prompt;
       button.append(title, excerpt);
+      if (routine.interval_hours !== null) {
+        const schedule = document.createElement('span');
+        const status = routine.last_run_status ? ` · última: ${routine.last_run_status}` : '';
+        const next = ` · próxima: ${formatRoutineTime(routine.next_run_at_unix_ms)}`;
+        const cost = routine.last_cost_usd !== null ? ` · US$ ${routine.last_cost_usd.toFixed(4)}` : '';
+        schedule.textContent = `A cada ${routine.interval_hours} h${status}${cost}${next}`;
+        button.append(schedule);
+        if (routine.last_run_error) {
+          const error = document.createElement('span');
+          error.textContent = routine.last_run_error;
+          button.append(error);
+        }
+      }
       item.append(button);
       list.append(item);
     }
-    const routine = routines.find((item) => item.id === selectedId) ?? routines[0]!;
-    setRoutineEditor(routine);
+    if (syncEditor) {
+      const routine = routines.find((item) => item.id === selectedId) ?? routines[0]!;
+      setRoutineEditor(routine);
+    }
   } catch (error) {
     const empty = document.createElement('li');
     empty.className = 'artifacts-view__empty';
@@ -308,11 +324,17 @@ async function loadRoutines(selectedId = currentRoutineId): Promise<void> {
   }
 }
 
-function setRoutineEditor(routine?: { id: string; title: string; prompt: string }): void {
+function formatRoutineTime(timestamp: number | null): string {
+  return timestamp === null ? '—' : new Date(timestamp).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function setRoutineEditor(routine?: { id: string; title: string; prompt: string; interval_hours?: number | null }): void {
   currentRoutineId = routine?.id;
+  currentRoutineIntervalHours = routine?.interval_hours ?? null;
   el<HTMLInputElement>('routine-id').value = routine?.id ?? '';
   el<HTMLInputElement>('routine-title').value = routine?.title ?? '';
   el<HTMLTextAreaElement>('routine-prompt').value = routine?.prompt ?? '';
+  el<HTMLSelectElement>('routine-interval').value = currentRoutineIntervalHours?.toString() ?? '';
   el<HTMLFormElement>('routine-editor').querySelector<HTMLButtonElement>('[data-action="delete-routine"]')!.hidden = !routine;
   el<HTMLElement>('routine-feedback').hidden = true;
   el<HTMLElement>('routine-feedback').textContent = '';
@@ -333,12 +355,21 @@ async function saveCurrentRoutine(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   const title = el<HTMLInputElement>('routine-title').value.trim();
   const prompt = el<HTMLTextAreaElement>('routine-prompt').value.trim();
+  const intervalValue = el<HTMLSelectElement>('routine-interval').value;
+  const intervalHours = intervalValue === '' ? null : Number.parseInt(intervalValue, 10);
   if (!title || !prompt) return;
+  if (intervalHours !== null && intervalHours !== currentRoutineIntervalHours) {
+    const accepted = window.confirm(
+      `Agendar “${title}” a cada ${intervalHours} hora(s)? O Harness enviará as instruções ao modelo automaticamente, o que pode gerar custos. O daemon local precisa estar aberto.`,
+    );
+    if (!accepted) return;
+  }
   try {
     const saved = await bridge.saveRoutine(currentWorkspace, {
       ...(currentRoutineId ? { id: currentRoutineId } : {}),
       title,
       prompt,
+      interval_hours: intervalHours,
     });
     currentRoutineId = saved.id;
     await loadRoutines(saved.id);
@@ -1504,6 +1535,9 @@ function handleChromeAction(action: string): void {
     case 'new-routine':
       setRoutineEditor();
       el<HTMLInputElement>('routine-title').focus();
+      return;
+    case 'refresh-routines':
+      void loadRoutines(currentRoutineId, false);
       return;
     case 'close-search':
       el<HTMLElement>('search-view').hidden = true;

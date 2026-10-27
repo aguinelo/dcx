@@ -64,6 +64,12 @@ export interface HarnessRoutine {
   prompt: string;
   created_at_unix_ms: number;
   updated_at_unix_ms: number;
+  interval_hours: number | null;
+  next_run_at_unix_ms: number | null;
+  last_run_at_unix_ms: number | null;
+  last_run_status: string | null;
+  last_run_error: string | null;
+  last_cost_usd: number | null;
 }
 
 export interface HarnessEvent {
@@ -165,7 +171,7 @@ export class HarnessClient {
     return this.get(`/routines?workspace=${encodeURIComponent(workspace)}`);
   }
 
-  async saveRoutine(workspace: string, routine: { id?: string; title: string; prompt: string }): Promise<HarnessRoutine> {
+  async saveRoutine(workspace: string, routine: { id?: string; title: string; prompt: string; interval_hours: number | null }): Promise<HarnessRoutine> {
     return this.post('/routines', { workspace, ...routine });
   }
 

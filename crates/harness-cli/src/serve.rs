@@ -72,6 +72,8 @@ struct SaveRoutineRequest {
     id: Option<String>,
     title: String,
     prompt: String,
+    #[serde(default)]
+    interval_hours: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +83,7 @@ struct DeleteRoutineRequest {
 }
 
 pub fn run(bind: &str) -> Result<(), String> {
+    crate::scheduler::start();
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("não foi possível abrir {bind}: {error}"))?;
     println!("Harness serve ouvindo em http://{bind}");
@@ -253,6 +256,12 @@ fn handle_routines(stream: &mut TcpStream, query: &str) -> Result<(), String> {
         .ok_or("GET /routines exige ?workspace=<diretório>".to_owned())?;
     let workspace = PathBuf::from(percent_decode(&workspace)?);
     let routines = crate::routines::list(&workspace)?;
+    if routines
+        .iter()
+        .any(|routine| routine.interval_hours.is_some())
+    {
+        crate::routines::register_workspace(&workspace)?;
+    }
     respond_json(
         stream,
         200,
@@ -268,7 +277,11 @@ fn handle_save_routine(stream: &mut TcpStream, body: &str) -> Result<(), String>
         request.id.as_deref(),
         &request.title,
         &request.prompt,
+        request.interval_hours,
     )?;
+    if routine.interval_hours.is_some() {
+        crate::routines::register_workspace(Path::new(&request.workspace))?;
+    }
     respond_json(
         stream,
         200,

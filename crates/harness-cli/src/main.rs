@@ -10,6 +10,7 @@ mod lock;
 mod metrics;
 mod providers;
 mod routines;
+mod scheduler;
 mod schemas;
 mod serve;
 mod state;

@@ -100,6 +100,7 @@
           <header class="routines-view__head">
             <div><h1>Rotinas</h1><p>Instruções salvas neste workspace. Revise no composer antes de enviar.</p></div>
             <div class="artifacts-view__actions">
+              <button class="btn" data-action="refresh-routines">Atualizar</button>
               <button class="btn" data-action="new-routine">Nova rotina</button>
               <button class="iconbtn" data-action="close-routines" title="Voltar à conversa">✕</button>
             </div>
@@ -110,6 +111,8 @@
               <input id="routine-id" type="hidden" />
               <label>Nome<input id="routine-title" maxlength="100" required placeholder="Ex.: Revisar um pull request" /></label>
               <label>Instruções<textarea id="routine-prompt" maxlength="12000" rows="10" required placeholder="Descreva o que o assistente deve fazer quando você usar esta rotina."></textarea></label>
+              <label>Agendamento<select id="routine-interval"><option value="">Desativado</option><option value="1">A cada 1 hora</option><option value="6">A cada 6 horas</option><option value="12">A cada 12 horas</option><option value="24">A cada 24 horas</option><option value="168">A cada 7 dias</option></select></label>
+              <p class="routine-editor__hint">Uma rotina agendada envia estas instruções automaticamente ao modelo e pode gerar custos. O daemon local precisa estar aberto; ao voltar, ele executa uma vez a ocorrência vencida e ignora os ciclos intermediários perdidos.</p>
               <p class="routine-editor__hint">Usar uma rotina abre uma conversa nova e preenche o composer. Nada é enviado até você revisar e enviar.</p>
               <p class="routine-editor__hint" id="routine-feedback" role="status" aria-live="polite" hidden></p>
               <div class="routine-editor__actions">
