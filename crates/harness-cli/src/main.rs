@@ -7,6 +7,7 @@ mod events;
 mod interactive;
 mod jobs;
 mod lock;
+mod loop_queue;
 mod metrics;
 mod providers;
 mod routines;
@@ -105,6 +106,47 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("loop") => match args.next().as_deref() {
+            Some("start") => {
+                let mut manifest = None;
+                while let Some(flag) = args.next() {
+                    match flag.as_str() {
+                        "--file" => manifest = args.next().map(std::path::PathBuf::from),
+                        _ => {
+                            eprintln!("Uso: harness loop start --file <tasks.json>");
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                let Some(manifest) = manifest else {
+                    eprintln!("Uso: harness loop start --file <tasks.json>");
+                    std::process::exit(2);
+                };
+                if let Err(error) = loop_queue::start(&manifest) {
+                    eprintln!("Fila pausada: {error}");
+                    std::process::exit(1);
+                }
+            }
+            Some("resume") => {
+                if args.next().as_deref() != Some("--id") {
+                    eprintln!("Uso: harness loop resume --id <loop_id>");
+                    std::process::exit(2);
+                }
+                let id = args.next().unwrap_or_default();
+                if id.is_empty() || args.next().is_some() {
+                    eprintln!("Uso: harness loop resume --id <loop_id>");
+                    std::process::exit(2);
+                }
+                if let Err(error) = loop_queue::resume(&id) {
+                    eprintln!("Fila pausada: {error}");
+                    std::process::exit(1);
+                }
+            }
+            _ => {
+                eprintln!("Uso: harness loop <start --file <tasks.json> | resume --id <loop_id>>");
+                std::process::exit(2);
+            }
+        },
         Some("run") => match args.next().as_deref() {
             Some("--demo") if args.next().is_none() => {
                 if let Err(error) = demo::run() {
@@ -241,7 +283,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|resume --run <run_id>|dispute --run <id> ...|state prune ...|--version|run ...>"
+                "Uso: harness <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|loop start --file <tasks.json>|loop resume --id <loop_id>|resume --run <run_id>|dispute --run <id> ...|state prune ...|--version|run ...>"
             );
             std::process::exit(2);
         }

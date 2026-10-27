@@ -95,6 +95,19 @@ Set `HARNESS_ACCEPTANCE_MODEL` to choose the acceptance author model, `HARNESS_P
 
 Runs can be bounded for unattended or overnight use with optional environment limits: `HARNESS_RUN_MAX_MODEL_CALLS` caps provider calls, `HARNESS_RUN_MAX_COST_USD` caps known provider spend, and `HARNESS_RUN_MAX_DURATION_MINUTES` caps elapsed run time. Limits are checked between model calls and after each completed call; a call already in progress can exceed the cost ceiling before the Harness receives its reported cost. A configured cost ceiling fails closed if the provider does not report cost, including Codex. These limits bound one run; they do not automatically approve contracts, select follow-up tasks, or run an unbounded queue. Human approval gates remain active.
 
+For a finite sequence of requests, create a JSON manifest with at most 25 tasks:
+
+```json
+{
+  "tasks": [
+    { "id": "add-health-check", "request": "Add a health-check endpoint and document it." },
+    { "id": "improve-errors", "request": "Improve API error messages and preserve the existing behavior." }
+  ]
+}
+```
+
+Run it from the target workspace with `harness loop start --file tasks.json`. The queue saves a checkpoint under `.harness/loops/`, processes tasks in order, and stops at the first failed or interrupted task. Resume with `harness loop resume --id <loop_id>`; completed tasks are skipped, and a task with a saved run id resumes through the normal run flow. Contract and other human approval prompts still require input. Run limits apply separately to each task; the queue is finite and capped at 25 tasks.
+
 ## Ambiente e segredos
 
 `harness` carrega `.env` do diretório atual antes de ler a configuração; `harness chat --workspace <dir>` também carrega o `.env` daquele projeto. Use `HARNESS_ENV_FILE=<arquivo>` para apontar outro arquivo explicitamente. As chaves e configurações de provider lidas do `.env` são aplicadas diretamente aos processos do Claude/MiniMax, então não precisam ser exportadas no shell.

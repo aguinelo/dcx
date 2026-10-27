@@ -24,6 +24,13 @@ use crate::workspace;
 type InteractiveResult<T> = Result<T, Box<dyn Error>>;
 
 pub fn run(request: &str) -> InteractiveResult<()> {
+    run_tracked(request, |_| Ok(()))
+}
+
+pub fn run_tracked(
+    request: &str,
+    mut on_run_id: impl FnMut(&str) -> Result<(), String>,
+) -> InteractiveResult<()> {
     if request.trim().is_empty() {
         return Err("O pedido não pode estar vazio.".into());
     }
@@ -50,6 +57,7 @@ pub fn run(request: &str) -> InteractiveResult<()> {
     )?;
     lifecycle.transition(RunState::AcceptanceAuthoring)?;
     let run_id = new_run_id();
+    on_run_id(&run_id)?;
     let artifact_dir = save_artifacts(
         &workspace,
         &run_id,
