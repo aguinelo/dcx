@@ -44,7 +44,16 @@ Each criterion, with its `id`, states one observable behavior that an
 outsider can judge true or false by exercising the interface, without
 judging intent. Not "the API is fast" or "errors are handled well", but
 "`GET /tasks` without a token answers 401". Quantify every threshold, limit
-and default. Split compound sentences: one behavior, one criterion.
+and default.
+
+**Consolidate aspects of the same deliverable.** Multiple properties of one
+output (file existence, content, byte count, encoding, absence of BOM) are
+ONE criterion when fixing one automatically satisfies the others. Write a
+single criterion that enumerates all required properties. Only split into
+separate criteria when a wrong implementation could satisfy one but not the
+other. For example: a file's content, size and encoding are one criterion;
+the file's existence and its content are the same criterion when the content
+uniquely determines the file.
 
 Cover the request completely: every expectation in the `goal` and in
 `answers[]` maps to at least one criterion. Do not invent criteria nobody
@@ -94,7 +103,32 @@ one, try to rewrite the criterion into something checkable. If you keep it,
 cover the deterministic part with a computational sensor as well and state
 the rubric the judge applies.
 
-## Principle 8 — Hidden sensors
+## Principle 8 — Proportional to the request
+
+A contract's criteria and sensors must be proportional to the scope of the
+request. A single-output request (create one file, add one endpoint, fix one
+bug) merits at most three criteria. Before splitting a behavior into sub-
+criteria, ask: if the executor fixes one, does the fix automatically satisfy
+the other? If yes, merge them into one criterion that names all observable
+aspects — do not create separate criteria for file existence, byte count,
+encoding, and the absence of a BOM when those are all consequences of
+"correct content". The split adds noise without adding verification power.
+
+Constraints like "do not modify other files" belong in `constraints`, not as
+separate criteria. A criterion must be violated by a wrong implementation;
+"workspace unchanged" is always implied and never a criterion of its own.
+
+## Principle 9 — No tool scaffolding in the interface or criteria
+
+The interface and the criteria cover only the task's deliverables. Directories
+and files the tool creates to manage its own execution — `.dcx/`, lock files,
+run records, session folders — are internal scaffolding. They must not appear
+in the interface, criteria or sensors unless the task explicitly asks to change
+them. In particular: never reference specific PID values, file hashes, inode
+numbers or timestamps of the tool's own run files; those are implementation
+details of the tool, invisible to the user, and they change between runs.
+
+## Principle 10 — Hidden sensors
 
 Hidden sensors run only in `verifying` and exist to catch code written only
 to pass the visible checks. Put them where a shortcut is tempting:
@@ -114,7 +148,7 @@ idempotency, encodings, authorization across users.
 - Describe hidden checks as precisely as visible ones. Keeping them away from
   the `planner` and the `executor` is the dcode's job, not vagueness's.
 
-## Principle 9 — Constraints and out of scope
+## Principle 11 — Constraints and out of scope
 
 `constraints` holds only what is declared or requested: the stack from the
 profile's `[stack]` and the request, limits, mandatory patterns from the
@@ -127,7 +161,7 @@ done: adjacent features, options the answers ruled out, open questions
 resolved to "not now", data migration, deploy. An empty `out_of_scope` is
 rarely right.
 
-## Principle 10 — No implementation design
+## Principle 12 — No implementation design
 
 No modules, classes, algorithms, libraries (unless a constraint), storage
 internals or step breakdown: those belong to the `planner` and the
@@ -135,7 +169,7 @@ internals or step breakdown: those belong to the `planner` and the
 the same observable behavior and the sentence would no longer hold, delete
 it.
 
-## Principle 11 — Re-contracting
+## Principle 13 — Re-contracting
 
 Every correction is a new version; nothing is overwritten. In both cases
 below, unchanged criteria and sensors keep their `id` and wording exactly; a
