@@ -44,10 +44,11 @@ async function readJson(file) {
 	return JSON.parse(await readFile(file, "utf8"));
 }
 
-async function evaluateOnce(testCase, provider, env, binary, attempt) {
+async function evaluateOnce(testCase, provider, env, binary, attempt, { timeoutMs = 8 * 60 * 1000 } = {}) {
 	const workspace = await makeWorkspace(`dcx-contract-eval-${attempt}-`);
 	const started = Date.now();
 	let processResult;
+	let timedOut = false;
 	try {
 		processResult = await runProcess(
 			binary,
@@ -60,10 +61,23 @@ async function evaluateOnce(testCase, provider, env, binary, attempt) {
 					DCX_RUN_MAX_MODEL_CALLS: String(testCase.max_model_calls),
 					DCX_RUN_MAX_COST_USD: String(testCase.max_cost_usd_per_attempt),
 				},
-			input: "s\n",
-			timeoutMs: 8 * 60 * 1000,
+				input: "s\n",
+				timeoutMs,
 			},
 		);
+	} catch (error) {
+		if (!error.message.includes("excedeu")) throw error;
+		timedOut = true;
+		const timeoutMsg = error.message;
+		const stdoutMatch = timeoutMsg.match(/\nstdout:\n([\s\S]*?)\nstderr:\n/);
+		const stderrMatch = timeoutMsg.match(/\nstderr:\n([\s\S]*)$/);
+		processResult = {
+			code: null,
+			stdout: stdoutMatch?.[1] ?? "",
+			stderr: stderrMatch?.[1] ?? "",
+		};
+	}
+	try {
 		const entries = await readdir(path.join(workspace, ".dcx", "runs"), {
 			withFileTypes: true,
 		});
@@ -147,12 +161,13 @@ export async function runContractEval({
 	repeat,
 	env,
 	binary,
+	timeoutMs,
 	onProgress = async () => {},
 }) {
 	const results = [];
 	const startedAt = new Date().toISOString();
 	for (let attempt = 1; attempt <= repeat; attempt += 1) {
-		const result = await evaluateOnce(suite, provider, env, binary, attempt);
+		const result = await evaluateOnce(suite, provider, env, binary, attempt, { timeoutMs });
 		results.push(result);
 		const snapshot = createReport(suite, provider, repeat, results, startedAt);
 		await onProgress(snapshot);
