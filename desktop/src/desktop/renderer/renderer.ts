@@ -7,7 +7,7 @@
 
 import type { DcxLoopSummary } from '../../dcx/client.ts';
 import { describeLoop } from './loops.ts';
-import { describeActivity, describeProgress, formatActivityElapsed } from './activity.ts';
+import { activityIndicatorMarkup, describeActivity, describeProgress, formatActivityElapsed } from './activity.ts';
 import type { BackgroundTask } from './mock.ts';
 
 interface AgentEventPayload {
@@ -1521,7 +1521,7 @@ function setThinking(active: boolean, doneLabel = 'Concluído'): void {
   if (active && !thinkingNode) {
     thinkingNode = row(
       'thinking',
-      '<div class="thinking__body action-steps" aria-live="polite"></div><button class="thinking__summary" type="button" aria-expanded="true"><span class="thinking__spinner" aria-hidden="true">⠿</span><span class="thinking__label">Analisando seu pedido…</span><span class="thinking__elapsed">0 s</span><span class="thinking__chevron" aria-hidden="true">›</span></button>',
+      `<div class="thinking__body action-steps" aria-live="polite"></div><button class="thinking__summary" type="button" aria-expanded="true">${activityIndicatorMarkup()}<span class="thinking__label">Analisando seu pedido…</span><span class="thinking__elapsed">0 s</span><span class="thinking__chevron" aria-hidden="true">›</span></button>`,
     );
     thinkingBody = thinkingNode.querySelector<HTMLElement>('.thinking__body') ?? undefined;
     thread.append(thinkingNode);
@@ -1533,7 +1533,7 @@ function setThinking(active: boolean, doneLabel = 'Concluído'): void {
       thinkingNode.classList.remove('thinking--done', 'thinking--error');
       setActivityStatus('Analisando seu pedido…', true);
       const spinner = thinkingNode.querySelector<HTMLElement>('.thinking__spinner');
-      if (spinner) spinner.textContent = '⠿';
+      if (spinner) spinner.outerHTML = activityIndicatorMarkup();
     }
   } else if (!active && thinkingNode) {
     const failed = doneLabel !== 'Concluído' && doneLabel !== 'Run concluído';

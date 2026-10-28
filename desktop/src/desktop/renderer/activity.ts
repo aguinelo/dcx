@@ -1,5 +1,9 @@
 type ActivityInput = Record<string, unknown>;
 
+export function activityIndicatorMarkup(): string {
+  return '<span class="thinking__spinner" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
+}
+
 function inputText(input: ActivityInput, key: string): string | undefined {
   const value = input[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;

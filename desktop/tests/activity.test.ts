@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { describeActivity, describeProgress, formatActivityElapsed } from '../src/desktop/renderer/activity.ts';
+import {
+  activityIndicatorMarkup,
+  describeActivity,
+  describeProgress,
+  formatActivityElapsed,
+} from '../src/desktop/renderer/activity.ts';
+
+test('activity status uses the compact four-dot indicator from the reference', () => {
+  assert.equal(
+    activityIndicatorMarkup(),
+    '<span class="thinking__spinner" aria-hidden="true"><i></i><i></i><i></i><i></i></span>',
+  );
+});
 
 test('read activity is described in plain Portuguese with the file name', () => {
   assert.equal(
@@ -31,7 +43,10 @@ test('elapsed time uses seconds then minutes and seconds', () => {
 });
 
 test('untrusted progress text is not shown as a reasoning trace', () => {
-  assert.equal(describeProgress('Let me think through the problem carefully'), 'Trabalhando no seu pedido…');
+  assert.equal(
+    describeProgress('Let me think through the problem carefully'),
+    'Trabalhando no seu pedido…',
+  );
 });
 
 test('web progress is mapped to short user-facing status', () => {

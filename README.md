@@ -126,7 +126,7 @@ DCX_RUN_MAX_DURATION_MINUTES=120
 
 Os limites por tarefa e os limites globais da fila são aplicados juntos. O custo pode passar do teto pelo valor de uma chamada já iniciada, pois ele só é conhecido quando o modelo responde. Para usar um teto de custo, escolha um modelo que informe o custo; o Codex não fornece esse dado.
 
-O chat usa somente ferramentas de leitura para consultar o projeto, o que reduz o custo das respostas. Se um limite interromper uma tentativa, a sessão mantém os tokens já informados e avisa quando o custo final não pôde ser confirmado. Para habilitar pesquisa na web durante a conversa, configure `DCX_CHAT_WEB=1` no `.env`. Sem essa opção, a conversa pesquisa apenas o projeto.
+O chat usa somente ferramentas de leitura para consultar o projeto, o que reduz o custo das respostas. Enquanto o modelo trabalha, o app mostra as ações reais em uma lista compacta, atualiza a atividade atual e o tempo decorrido; você pode recolher essa lista. O indicador não exibe raciocínio interno do modelo. Se um limite interromper uma tentativa, a sessão mantém os tokens já informados e avisa quando o custo final não pôde ser confirmado. Para habilitar pesquisa na web durante a conversa, configure `DCX_CHAT_WEB=1` no `.env`. Sem essa opção, a conversa pesquisa apenas o projeto.
 
 ## Usar o app desktop
 
