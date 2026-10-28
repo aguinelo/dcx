@@ -119,6 +119,38 @@ node tools/eval/compare.mjs \
 
 A comparação exige os mesmos casos e repetições, não aceita queda de qualidade e reprova quando o custo por resposta sobe mais de 10% ou o p95 sobe mais de 25%. Se faltar o custo informado pelo provider, a comparação falha em vez de considerar a medição aprovada.
 
+### Avaliar qualidade com juiz
+
+Para avaliar respostas abertas, adicione `--judge`. O juiz recebe a solicitação da eval, a resposta gerada, o contexto do caso e uma rubrica versionada; devolve somente notas de 1 a 5 e códigos curtos de problema, sem justificativa ou raciocínio. Uma resposta só passa se cumprir os checks determinísticos e atingir a nota mínima de cada critério. O relatório separa custo e latência do chat e do juiz; o bundle soma ambos para os sensores e tetos.
+
+Como essa opção faz chamadas extras e pode gerar custo, ela fica desligada por padrão. Se o chat usa MiniMax e o juiz Claude, as duas chaves precisam estar disponíveis:
+
+```sh
+set -a; source .env; set +a
+DCX_EVAL=1 node tools/eval/run.mjs \
+  --suite evals/smoke.json \
+  --provider minimax \
+  --judge \
+  --judge-provider claude \
+  --repeat 3
+```
+
+A rubrica padrão está em `evals/rubrics/chat-quality.json`. `--judge-rubric` permite usar outra; `--judge-provider` aceita `claude` ou `minimax`. O nome do relatório ganha o sufixo `-judged`, para não comparar acidentalmente com a linha de base sem juiz.
+
+Antes de confiar em uma rubrica ou trocar o modelo avaliador, rode a calibração com respostas de resultado conhecido:
+
+```sh
+DCX_EVAL=1 node tools/eval/judge-calibration.mjs \
+  --provider claude \
+  --repeat 3
+```
+
+`--dry-run` mostra os casos e provider sem chamar modelos. Os testes do parser, da rubrica e do gate rodam sem token:
+
+```sh
+node --test tools/eval/judge.test.mjs tools/eval/judge-calibration.test.mjs tools/eval/run.test.mjs
+```
+
 Além dos checks de cada caso, todo caso reprova quando a resposta vem vazia ou quando o CLI informa um erro, para que um caso com checks só negativos não passe quando o modelo não responde.
 
 ## Sensores de observabilidade
@@ -175,7 +207,11 @@ node tools/observe/collect.mjs \
 
 Sem `--run`, o coletor usa o run mais recente em `.dcx/runs`. Use `--expect rejected` para um run que deve falhar, `--allow-fallback` para declarar múltiplos providers e `--strict` para sair com erro quando o bundle não estiver ok. Os tetos opcionais são `--max-cost-usd`, `--max-duration-ms` e `--max-model-calls`.
 
-### Medição local de 2026-10-27
+### Medições locais de 2026-10-27 e 2026-10-28
+
+Calibração do juiz Claude Sonnet: 9/9 classificações corretas (3 casos × 3 repetições), US$ 0,0097 e 33,2 s. A primeira passada MiniMax + juiz Claude, com a suite smoke de 5 casos, aprovou 5/5 no chat e 5/5 no juiz; custo US$ 0,1130 do chat + US$ 0,0087 do juiz; sensores 6/6.
+
+Na repetição 3× da integração, o juiz e os checks aprovaram 13/15 tentativas. Duas respostas ao pedido de criar um arquivo foram reprovadas: uma atingiu o limite de ferramentas e não respondeu; outra passou dos limites de concisão definidos pelo produto. O custo de chat ficou incompleto porque uma chamada foi interrompida; o juiz custou US$ 0,0210. Isso detectou uma instabilidade real do MiniMax nesse pedido; a linha de base de qualidade com juiz ainda não deve ser criada.
 
 | Provider | E2E | Custo E2E | Eval | Custo eval | p95 eval | Observabilidade |
 |---|---|---|---|---|---|---|
@@ -189,7 +225,7 @@ Os valores variam por execução. O controle negativo reprovou os seis sensores 
 - E2E da interface Electron e do DMG empacotado.
 - E2E do fluxo completo `run --request` com contrato, sensores, plano, execução e merge gate.
 - Automatizar a coleta de `.dcx/runs/<id>` no e2e e no CI; hoje o coletor é manual.
-- Eval com juiz de modelo, rubricas abertas e comparação entre providers/modelos.
+- Corrigir e repetir a resposta read-only do MiniMax, que falhou em 2/3 tentativas na suite julgada; depois criar uma linha de base versionada para notas abertas.
 - Threshold de regressão por suite e histórico versionado de resultados.
 - Cobertura de terminal, rotinas, GitHub e recuperação de runs no e2e real.
 

@@ -1,0 +1,21 @@
+{
+	"schema_version": 1,
+	"name": "chat-quality-v1",
+	"criteria": [
+		{
+			"id": "correctness",
+			"description": "A resposta está correta e apoiada apenas no pedido e no contexto disponível; não inventa fatos.",
+			"pass_score": 4
+		},
+		{
+			"id": "instruction_following",
+			"description": "A resposta atende ao pedido e respeita as instruções explícitas de idioma, formato, concisão e limites do chat.",
+			"pass_score": 4
+		},
+		{
+			"id": "clarity",
+			"description": "A resposta é clara, natural e proporcional à pergunta.",
+			"pass_score": 4
+		}
+	]
+}

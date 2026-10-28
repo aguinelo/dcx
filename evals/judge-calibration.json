@@ -1,0 +1,38 @@
+{
+	"schema_version": 1,
+	"name": "judge-calibration-arithmetic",
+	"rubric": {
+		"criteria": [
+			{
+				"id": "correctness",
+				"description": "A resposta informa corretamente o resultado de 2 + 2, que é 4.",
+				"pass_score": 4
+			},
+			{
+				"id": "format",
+				"description": "A resposta é direta e usa somente o resultado pedido, sem explicação extra.",
+				"pass_score": 4
+			}
+		]
+	},
+	"cases": [
+		{
+			"id": "correct-concise-answer",
+			"expected_pass": true,
+			"prompt": "Quanto é 2 + 2? Responda somente com o resultado.",
+			"response": "4"
+		},
+		{
+			"id": "incorrect-answer",
+			"expected_pass": false,
+			"prompt": "Quanto é 2 + 2? Responda somente com o resultado.",
+			"response": "5"
+		},
+		{
+			"id": "correct-but-wrong-format",
+			"expected_pass": false,
+			"prompt": "Quanto é 2 + 2? Responda somente com o resultado.",
+			"response": "A resposta é 4 porque, ao somar dois e dois, chegamos a quatro."
+		}
+	]
+}

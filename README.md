@@ -128,6 +128,8 @@ Os limites por tarefa e os limites globais da fila são aplicados juntos. O cust
 
 O chat usa somente ferramentas de leitura para consultar o projeto, o que reduz o custo das respostas. Enquanto o modelo trabalha, o app mostra as ações reais em uma lista compacta, atualiza a atividade atual e o tempo decorrido; você pode recolher essa lista. O indicador não exibe raciocínio interno do modelo. Se um limite interromper uma tentativa, a sessão mantém os tokens já informados e avisa quando o custo final não pôde ser confirmado. Para habilitar pesquisa na web durante a conversa, configure `DCX_CHAT_WEB=1` no `.env`. Sem essa opção, a conversa pesquisa apenas o projeto.
 
+As evals medem respostas com checks objetivos. Para incluir uma nota de qualidade por rubrica, use `--judge` ao rodar uma eval; isso faz chamadas adicionais e gera custo. Veja [como rodar as evals](docs/testing.md#avaliar-qualidade-com-juiz).
+
 ## Usar o app desktop
 
 Para iniciar a versão de desenvolvimento:

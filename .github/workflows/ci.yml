@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 20
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - run: node --test tools/eval/scorer.test.mjs tools/eval/compare.test.mjs tools/observe/run.test.mjs tools/observe/collect.test.mjs
+      - run: node --test tools/eval/scorer.test.mjs tools/eval/compare.test.mjs tools/eval/judge.test.mjs tools/eval/judge-calibration.test.mjs tools/eval/run.test.mjs tools/observe/run.test.mjs tools/observe/collect.test.mjs
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings

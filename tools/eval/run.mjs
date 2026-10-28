@@ -13,6 +13,46 @@ import {
 	snapshotProject,
 } from "../lib/real.mjs";
 import { scoreCase, summarize } from "./scorer.mjs";
+import {
+	judgeResponse,
+	summarizeJudgments,
+	validateRubric,
+} from "./judge.mjs";
+import { pathToFileURL } from "node:url";
+
+export function combineEvalScore(deterministic, judgment = null) {
+	return deterministic && (judgment === null || judgment.passed === true);
+}
+
+export function describeFailure(result) {
+	const parts = [];
+	if (result.error) parts.push(result.error);
+	if (Array.isArray(result.failures) && result.failures.length > 0) {
+		parts.push(JSON.stringify(result.failures));
+	}
+	if (result.judge?.passed === false) {
+		const issues = result.judge.issue_codes?.join(", ");
+		parts.push(`juiz: ${issues || JSON.stringify(result.judge.scores ?? {})}`);
+	}
+	return parts.join(" · ") || "falha sem detalhes";
+}
+
+export function buildEvalJudgeContext(testCase, deterministic = { passed: true, failures: [] }) {
+	const parts = [];
+	if (testCase.judge_context) parts.push(testCase.judge_context);
+	if (Array.isArray(testCase.checks) && testCase.checks.length > 0) {
+		if (deterministic.passed) {
+			parts.push(
+				`Os checks determinísticos abaixo passaram e devem ser considerados evidência verificada: ${JSON.stringify(testCase.checks)}.`,
+			);
+		} else {
+			parts.push(
+				`Os checks determinísticos abaixo não passaram todos. Considere estas falhas registradas: ${JSON.stringify(deterministic.failures)}.`,
+			);
+		}
+	}
+	return parts.join("\n");
+}
 
 function parseArgs(argv) {
 	const args = {
@@ -22,6 +62,9 @@ function parseArgs(argv) {
 		json: false,
 		dryRun: false,
 		out: undefined,
+		judge: false,
+		judgeProvider: process.env.DCX_JUDGE_PROVIDER || undefined,
+		judgeRubric: "evals/rubrics/chat-quality.json",
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -29,6 +72,9 @@ function parseArgs(argv) {
 		else if (arg === "--provider") args.provider = argv[++index];
 		else if (arg === "--repeat") args.repeat = Number(argv[++index]);
 		else if (arg === "--out") args.out = argv[++index];
+		else if (arg === "--judge") args.judge = true;
+		else if (arg === "--judge-provider") args.judgeProvider = argv[++index];
+		else if (arg === "--judge-rubric") args.judgeRubric = argv[++index];
 		else if (arg === "--json") args.json = true;
 		else if (arg === "--dry-run") args.dryRun = true;
 		else throw new Error(`argumento desconhecido: ${arg}`);
@@ -87,7 +133,7 @@ async function fileState(workspace, checks) {
 	return files;
 }
 
-async function executeCase(testCase, env, binary) {
+async function executeCase(testCase, env, binary, judge) {
 	const workspace = await makeWorkspace(`dcx-eval-${testCase.id}-`);
 	const started = Date.now();
 	let before = null;
@@ -134,11 +180,32 @@ async function executeCase(testCase, env, binary) {
 			{ text, files, stderr: result.stderr },
 			testCase.checks,
 		);
+		let judgment = null;
+		if (judge) {
+			try {
+				judgment = await judgeResponse({
+					testCase: {
+						prompt: turns.join("\n"),
+						context: buildEvalJudgeContext(testCase, {
+							passed: score.ok,
+							failures: score.failures,
+						}),
+						response: text,
+					},
+					rubric: judge.rubric,
+					provider: judge.provider,
+				});
+			} catch (error) {
+				judgment = { passed: false, scores: {}, cost_usd: null, error: error.message };
+			}
+		}
 
 		return {
 			id: testCase.id,
-			ok: score.ok,
+			ok: combineEvalScore(score.ok, judgment),
+			deterministic_ok: score.ok,
 			failures: score.failures,
+			judge: judgment,
 			session_id: sessionId,
 			provider: session.provider,
 			model: session.model,
@@ -189,6 +256,13 @@ function printSummary(report, reportPath, bundlePath) {
 	console.log(
 		`Custo: US$ ${summary.cost_usd.toFixed(4)}${summary.cost_complete ? "" : " (incompleto)"}`,
 	);
+	if (report.judge) {
+		const judged = report.judge.summary;
+		console.log(
+			`Juiz (${report.judge.provider}): ${judged.passed}/${judged.total} aprovados; custo US$ ${judged.cost_usd.toFixed(4)}${judged.cost_complete ? "" : " (incompleto)"}`,
+		);
+		console.log(`Notas médias: ${JSON.stringify(judged.average_scores)}`);
+	}
 	console.log(
 		`Latência: p50 ${summary.latency_ms.p50 ?? "-"} ms, p95 ${summary.latency_ms.p95 ?? "-"} ms`,
 	);
@@ -201,9 +275,7 @@ function printSummary(report, reportPath, bundlePath) {
 	if (failed.length > 0) {
 		console.log("Falhas:");
 		for (const result of failed) {
-			console.log(
-				`- ${result.id}: ${result.error ?? JSON.stringify(result.failures)}`,
-			);
+			console.log(`- ${result.id}: ${describeFailure(result)}`);
 		}
 	}
 	console.log(`Relatório: ${reportPath}`);
@@ -213,20 +285,32 @@ function printSummary(report, reportPath, bundlePath) {
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	const suite = await loadSuite(args.suite);
+	const requestedProvider =
+		args.provider ?? suite.provider ?? process.env.DCX_E2E_PROVIDER ?? "minimax";
+	let judge = null;
+	if (args.judge) {
+		const rubricPath = path.resolve(repoRoot, args.judgeRubric);
+		const rubric = JSON.parse(await readFile(rubricPath, "utf8"));
+		validateRubric(rubric);
+		judge = {
+			rubric,
+			provider: args.judgeProvider ?? requestedProvider,
+		};
+	}
 
 	if (args.dryRun) {
 		console.log(
 			JSON.stringify(
 				{
-					suite: suite.name,
-					provider:
-						args.provider ??
-						suite.provider ??
-						process.env.DCX_E2E_PROVIDER ??
-						"minimax",
+						suite: `${suite.name}${judge ? "-judged" : ""}`,
+						provider: requestedProvider,
+						judge: judge
+							? { provider: judge.provider, rubric: judge.rubric.name ?? args.judgeRubric }
+							: null,
 					cases: suite.cases.map((testCase) => ({
 						id: testCase.id,
 						checks: testCase.checks,
+						judge_context: testCase.judge_context ?? null,
 					})),
 				},
 				null,
@@ -241,7 +325,6 @@ async function main() {
 			"defina DCX_EVAL=1 para executar evals com provider real",
 		);
 	}
-
 	const { provider, env } = realProviderEnv(args.provider ?? suite.provider);
 	const binary = await dcxBinary();
 	const startedAt = new Date().toISOString();
@@ -249,13 +332,13 @@ async function main() {
 	const results = [];
 	for (let attempt = 0; attempt < args.repeat; attempt += 1) {
 		for (const testCase of suite.cases) {
-			results.push(await executeCase(testCase, env, binary));
+			results.push(await executeCase(testCase, env, binary, judge));
 		}
 	}
 
 	const durationMs = Date.now() - started;
 	const report = {
-		suite: suite.name,
+		suite: `${suite.name}${judge ? "-judged" : ""}`,
 		provider,
 		model: results.find((result) => result.model)?.model ?? null,
 		started_at: startedAt,
@@ -263,10 +346,19 @@ async function main() {
 		repeat: args.repeat,
 		cases: results,
 		summary: summarize(results),
+		judge: judge
+			? {
+				provider: judge.provider,
+				rubric: judge.rubric.name ?? args.judgeRubric,
+				summary: summarizeJudgments(
+					results.map((item) => item.judge ?? { passed: false, cost_usd: null }),
+				),
+			}
+			: null,
 	};
 	const bundle = {
 		schema_version: 1,
-		name: `eval-${suite.name}-${provider}`,
+		name: `eval-${suite.name}${judge ? "-judged" : ""}-${provider}`,
 		kind: "eval",
 		provider,
 		started_at: startedAt,
@@ -274,9 +366,9 @@ async function main() {
 		ok: report.summary.failed === 0,
 		cases: results,
 		metrics: {
-			model_calls: results.length,
-			cost_usd: report.summary.cost_usd,
-			cost_complete: report.summary.cost_complete,
+			model_calls: results.length * (judge ? 2 : 1),
+			cost_usd: report.summary.cost_usd + (report.judge?.summary.cost_usd ?? 0),
+			cost_complete: report.summary.cost_complete && (!judge || report.judge.summary.cost_complete),
 		},
 		expected: {
 			provider,
@@ -284,7 +376,7 @@ async function main() {
 			repeat: args.repeat,
 			max_duration_ms: 180_000 * args.repeat,
 			max_cost_usd: 2.0,
-			max_model_calls: results.length,
+			max_model_calls: results.length * (judge ? 2 : 1),
 			allow_writes: false,
 		},
 	};
@@ -301,9 +393,17 @@ async function main() {
 	if (args.json) console.log(JSON.stringify(report, null, 2));
 	else printSummary(report, reportPath, bundlePath);
 	if (report.summary.failed > 0) process.exitCode = 1;
+	if (report.judge && (report.judge.summary.failed > 0 || !report.judge.summary.cost_complete)) {
+		process.exitCode = 1;
+	}
 }
 
-main().catch((error) => {
-	console.error(`FALHA: ${error.message}`);
-	process.exitCode = 1;
-});
+if (
+	process.argv[1] &&
+	pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+) {
+	main().catch((error) => {
+		console.error(`FALHA: ${error.message}`);
+		process.exitCode = 1;
+	});
+}
