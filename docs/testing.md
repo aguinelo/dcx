@@ -102,7 +102,17 @@ O teste sem custo valida a regra e o runner:
 node --test tools/eval/contract-quality.test.mjs tools/eval/contract-run.test.mjs
 ```
 
-A linha de base dessa eval ainda não foi aprovada: com MiniMax-M3, o Claude CLI não concluiu a geração do contrato em 8 minutos. Uma chamada estruturada mínima passou em 1 segundo com MiniMax-M3.1-Flash; esse passa a ser o modelo padrão. A medição do contrato com o modelo recomendado ainda precisa passar 3 vezes antes de qualquer ajuste no prompt.
+Linha de base com MiniMax-M3.1-Flash (`--repeat 1`, 28/10/2026):
+
+| Métrica | Resultado |
+|---|---|
+| Critérios gerados | 5 (limite da eval: 3) |
+| Sensores gerados | 7 (limite da eval: 5) |
+| Metadados internos no contrato | sim (PID e hash do lock) |
+| Chamadas de modelo (entendimento + contrato) | 2 |
+| Latência | ~8 min (timeout na etapa de sensores) |
+
+O modelo super-especifica contratos para tarefas simples e vaza detalhes internos do dcode (como caminho temporário e conteúdo do lock) nos critérios e sensores. Antes de ajustar o prompt do contratante, repita a medição 3 vezes para confirmar estabilidade; depois compare com os resultados pós-ajuste.
 
 ## Linha de base
 
