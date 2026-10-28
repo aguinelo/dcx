@@ -1,0 +1,10 @@
+{
+	"schema_version": 1,
+	"name": "simple-file-contract",
+	"request": "Crie somente o arquivo resultado.txt com o texto exato DCX_RUN_E2E_OK. Não altere outros arquivos.",
+	"artifact": "resultado.txt",
+	"max_criteria": 3,
+	"max_sensors": 5,
+	"max_cost_usd_per_attempt": 1.0,
+	"max_model_calls": 4
+}

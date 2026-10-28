@@ -56,7 +56,7 @@ pub(crate) fn resolve_model(
     match backend {
         Backend::Anthropic => crate::env_file::value(workspace, "DCX_CLAUDE_MODEL"),
         Backend::Minimax => crate::env_file::value(workspace, "DCX_MINIMAX_MODEL")
-            .or_else(|| Some("MiniMax-M3".to_owned())),
+            .or_else(|| Some("MiniMax-M3.1-Flash".to_owned())),
     }
 }
 
@@ -80,7 +80,7 @@ pub(crate) fn configure_backend(
                 })?;
             let base = crate::env_file::value(workspace, "DCX_MINIMAX_BASE_URL")
                 .unwrap_or_else(|| "https://api.minimax.io/anthropic".to_owned());
-            let model = model.unwrap_or("MiniMax-M3");
+            let model = model.unwrap_or("MiniMax-M3.1-Flash");
             command
                 .env_remove("ANTHROPIC_API_KEY")
                 .env("ANTHROPIC_BASE_URL", base)
@@ -160,12 +160,10 @@ impl ClaudeCli {
         let output = metrics::run_provider_command(&mut command, None)
             .map_err(|error| format!("Claude CLI: {error}"))?;
         if !output.status.success() {
-            let diagnostics = String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .take(3)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let diagnostics = provider_failure_diagnostic(
+                &String::from_utf8_lossy(&output.stderr),
+                &output.stdout,
+            );
             return Err(format!(
                 "Claude CLI encerrou com {}: {}",
                 output.status,
@@ -206,6 +204,38 @@ impl ClaudeCli {
         })?;
         Ok(parsed)
     }
+}
+
+fn provider_failure_diagnostic(stderr: &str, stdout: &[u8]) -> String {
+    let mut lines = stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(3)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut stdout_message = None;
+    if let Ok(envelope) = serde_json::from_slice::<serde_json::Value>(stdout) {
+        let message = envelope["result"]
+            .as_str()
+            .or_else(|| envelope["error"]["message"].as_str())
+            .or_else(|| envelope["message"].as_str());
+        if let Some(message) = message.filter(|message| !message.trim().is_empty()) {
+            stdout_message = Some(message.to_owned());
+        }
+    }
+    if stdout_message.is_none() {
+        let raw = String::from_utf8_lossy(stdout);
+        if !raw.trim().is_empty() {
+            stdout_message = Some(raw.trim().to_owned());
+        }
+    }
+    if let Some(message) = stdout_message {
+        lines.push(format!(
+            "resposta do provider: {}",
+            message.chars().take(1200).collect::<String>()
+        ));
+    }
+    lines.join("\n")
 }
 
 pub struct ClaudeCliAnalyst {
@@ -400,5 +430,40 @@ impl Verifier for ClaudeCliVerifier {
         let prompt = verifier_prompt(contract, suite, step_report, sensor_results)?;
         self.cli
             .invoke(workspace, Mode::ReadOnly, "verdict.schema.json", &prompt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Backend, provider_failure_diagnostic, resolve_model};
+    use std::path::Path;
+
+    #[test]
+    fn minimax_defaults_to_the_current_m3_1_flash_model() {
+        assert_eq!(
+            resolve_model(
+                Path::new("/tmp/dcx-workspace-without-env"),
+                Backend::Minimax,
+                None,
+                false,
+            ),
+            Some("MiniMax-M3.1-Flash".to_owned())
+        );
+    }
+
+    #[test]
+    fn provider_failure_diagnostic_includes_error_from_json_stdout() {
+        let message = provider_failure_diagnostic(
+            "[claude-code:unrecognized_model] warning",
+            br#"{"is_error":true,"result":"structured output schema is unsupported"}"#,
+        );
+        assert!(message.contains("structured output schema is unsupported"));
+        assert!(message.contains("unrecognized_model"));
+    }
+
+    #[test]
+    fn provider_failure_diagnostic_preserves_plain_stdout() {
+        let message = provider_failure_diagnostic("warning", b"HTTP 400: schema is not supported");
+        assert!(message.contains("HTTP 400: schema is not supported"));
     }
 }

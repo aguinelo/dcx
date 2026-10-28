@@ -269,6 +269,13 @@ pub enum SensorKind {
     Inferential,
 }
 
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum SensorPurposeSchema {
+    Acceptance,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct SensorSpec {
     pub id: String,
@@ -277,6 +284,7 @@ pub struct SensorSpec {
     pub sensor_type: SensorType,
     pub kind: SensorKind,
     pub visibility: SensorVisibility,
+    #[schemars(with = "SensorPurposeSchema")]
     pub purpose: String,
     pub check: String,
 }
@@ -1409,6 +1417,16 @@ mod tests {
             schemas
                 .iter()
                 .any(|(name, _)| *name == "contract.schema.json")
+        );
+        let contract_bundle = schemas
+            .iter()
+            .find(|(name, _)| *name == "contract_bundle.schema.json")
+            .expect("schema do contrato");
+        let contract_schema: serde_json::Value =
+            serde_json::from_str(&contract_bundle.1).expect("schema JSON");
+        assert_eq!(
+            contract_schema["$defs"]["SensorPurposeSchema"]["enum"][0], "acceptance",
+            "o modelo precisa receber a finalidade permitida no schema"
         );
         for (_, schema) in schemas {
             let value: serde_json::Value =

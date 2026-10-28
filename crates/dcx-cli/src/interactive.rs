@@ -144,7 +144,7 @@ fn parallel_demo_bundle() -> ContractBundle {
                 } else {
                     SensorVisibility::Hidden
                 },
-                purpose: "demonstração".into(),
+                purpose: "acceptance".into(),
                 check: "o arquivo do passo existe".into(),
             })
         })

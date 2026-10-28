@@ -7,6 +7,12 @@
       ],
       "type": "string"
     },
+    "SensorPurposeSchema": {
+      "enum": [
+        "acceptance"
+      ],
+      "type": "string"
+    },
     "SensorSpec": {
       "additionalProperties": false,
       "properties": {
@@ -23,7 +29,7 @@
           "$ref": "#/$defs/SensorKind"
         },
         "purpose": {
-          "type": "string"
+          "$ref": "#/$defs/SensorPurposeSchema"
         },
         "type": {
           "$ref": "#/$defs/SensorType"

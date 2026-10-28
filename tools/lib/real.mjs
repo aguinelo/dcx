@@ -59,6 +59,7 @@ export function runProcess(command, args, options = {}) {
 		const child = spawn(command, args, {
 			cwd,
 			env,
+			detached: process.platform !== "win32",
 			stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 		});
 		let stdout = "";
@@ -66,8 +67,8 @@ export function runProcess(command, args, options = {}) {
 		let timedOut = false;
 		const timer = setTimeout(() => {
 			timedOut = true;
-			child.kill("SIGTERM");
-			setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+			signalProcessTree(child, "SIGTERM");
+			setTimeout(() => signalProcessTree(child, "SIGKILL"), 5_000).unref();
 		}, timeoutMs);
 
 		child.stdin?.on("error", () => {});
@@ -97,6 +98,19 @@ export function runProcess(command, args, options = {}) {
 		});
 		if (input !== undefined) child.stdin.end(input);
 	});
+}
+
+function signalProcessTree(child, signal) {
+	if (!child.pid || child.exitCode !== null) return;
+	if (process.platform !== "win32") {
+		try {
+			process.kill(-child.pid, signal);
+			return;
+		} catch (error) {
+			if (error.code !== "ESRCH") throw error;
+		}
+	}
+	child.kill(signal);
 }
 
 export async function makeWorkspace(prefix) {

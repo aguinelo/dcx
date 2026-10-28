@@ -87,9 +87,26 @@ Os testes do scorer rodam sem token:
 node --test tools/eval/scorer.test.mjs
 ```
 
+### Avaliar contratos de tarefas simples
+
+Esta eval mede se uma solicitação pequena vira um contrato proporcional. Ela aprova o contrato apenas dentro de um projeto temporário e para antes da implementação, com o limite de quatro chamadas. O relatório registra critérios, sensores, custo e tempo; nenhuma alteração chega ao projeto real.
+
+```sh
+set -a; source .env; set +a
+DCX_EVAL=1 node tools/eval/contract-run.mjs --provider minimax --repeat 3
+```
+
+O teste sem custo valida a regra e o runner:
+
+```sh
+node --test tools/eval/contract-quality.test.mjs tools/eval/contract-run.test.mjs
+```
+
+A linha de base dessa eval ainda não foi aprovada: com MiniMax-M3, o Claude CLI não concluiu a geração do contrato em 8 minutos. Uma chamada estruturada mínima passou em 1 segundo com MiniMax-M3.1-Flash; esse passa a ser o modelo padrão. A medição do contrato com o modelo recomendado ainda precisa passar 3 vezes antes de qualquer ajuste no prompt.
+
 ## Linha de base
 
-Medição mais recente com MiniMax-M3 (`--repeat 3`, 28/10/2026):
+Medição da suite de chat com MiniMax-M3 (`--repeat 3`, 28/10/2026):
 
 | Métrica | Resultado |
 |---|---|
