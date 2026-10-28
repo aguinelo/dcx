@@ -87,16 +87,18 @@ node --test tools/eval/scorer.test.mjs
 
 ## Linha de base
 
-Última medição com MiniMax-M3 (`--repeat 3`, 27/10/2026):
+Medição mais recente com MiniMax-M3 (`--repeat 3`, 28/10/2026):
 
-| Métrica | Valor |
+| Métrica | Resultado |
 |---|---|
-| Casos | 12/12 (pass@k 100%) |
-| Latência | p50 4,4 s, p95 11,3 s |
-| Custo da suíte | US$ 0,95 (cerca de US$ 0,08 por resposta) |
-| Sensores | 6/6 no eval e 6/6 no e2e |
+| Casos | 15/15 aprovados (pass@k 100%) |
+| Latência | p50 3,4 s, p95 12,7 s |
+| Custo da suíte | US$ 0,36 (cerca de US$ 0,024 por resposta) |
+| Sensores | 6/6 passaram |
 
-Cada resposta parte de cerca de 18 mil tokens de entrada (instruções e ferramentas), então mesmo uma resposta de uma palavra custa perto de US$ 0,07. Se a latência ou o custo subirem muito acima disso, trate como regressão.
+Na comparação direta da suite anterior, com 12 casos e 3 repetições, o custo caiu de US$ 0,9569 para US$ 0,2910 (redução de 69,6%) e a entrada caiu de 225.635 para 60.531 tokens (redução de 73,2%). O p95 medido foi de 12,5 s antes e 14,4 s depois. A suite atualizada, com um caso novo de resposta direta, voltou a 12,7 s de p95 e passou em todas as repetições.
+
+O chat continua respondendo em português, consultando arquivos quando necessário e sem alterar o projeto. Se custo, latência ou algum check piorar numa mudança futura, compare com estes resultados.
 
 Além dos checks de cada caso, todo caso reprova quando a resposta vem vazia ou quando o CLI informa um erro, para que um caso com checks só negativos não passe quando o modelo não responde.
 

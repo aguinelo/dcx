@@ -45,6 +45,19 @@
 			]
 		},
 		{
+			"id": "history-direct",
+			"turns": [
+				"Meu codinome é ORION.",
+				"Qual é o meu codinome? Responda apenas o codinome, sem consultar arquivos."
+			],
+			"checks": [
+				{
+					"type": "contains",
+					"value": "ORION"
+				}
+			]
+		},
+		{
 			"id": "read-only",
 			"files": {
 				"README.md": "original\n"

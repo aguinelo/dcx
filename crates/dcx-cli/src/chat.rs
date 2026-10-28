@@ -274,6 +274,10 @@ impl ClaudeChatProvider {
                 "--permission-mode",
                 "plan",
             ])
+            .arg("--tools")
+            .arg("Read,Glob,Grep")
+            .arg("--strict-mcp-config")
+            .arg("--disable-slash-commands")
             .arg("--allowedTools=Read,Glob,Grep")
             .arg("--disallowedTools=Bash,Edit,Write,NotebookEdit,WebSearch,WebFetch,ToolSearch,Agent")
             .arg("--append-system-prompt")

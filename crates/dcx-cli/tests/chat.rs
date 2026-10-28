@@ -176,6 +176,9 @@ fn chat_streams_and_persists_a_read_only_session() {
     let args = fs::read_to_string(project.join("fake-args.log")).expect("args");
     assert!(args.lines().any(|line| line == "stream-json"));
     assert!(args.lines().any(|line| line == "plan"));
+    assert!(args.lines().any(|line| line == "Read,Glob,Grep"));
+    assert!(args.lines().any(|line| line == "--strict-mcp-config"));
+    assert!(args.lines().any(|line| line == "--disable-slash-commands"));
     assert!(
         args.lines()
             .any(|line| line == "--allowedTools=Read,Glob,Grep")
