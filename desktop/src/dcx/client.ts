@@ -25,8 +25,23 @@ export interface DcxMessage {
   cache_read_input_tokens?: number;
 }
 
+export interface DcxInterruptedCall {
+  created_at_unix_ms: number;
+  provider: string;
+  model?: string;
+  reason: string;
+  cost_usd: number | null;
+  cost_complete: boolean;
+  duration_ms: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
 export interface DcxSessionDetail extends DcxSession {
   messages: DcxMessage[];
+  interrupted_calls?: DcxInterruptedCall[];
 }
 
 export interface DcxRun {

@@ -52,6 +52,13 @@ interface ReplBridge {
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
     }>;
+    interrupted_calls?: Array<{
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      cost_complete: boolean;
+    }>;
   }>;
   projects(root: string): Promise<Array<{ path: string }>>;
   promote(workspace: string, sessionId: string): Promise<{ status: string; request: string }>;
@@ -623,7 +630,7 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
     document.querySelectorAll('[data-session-id]').forEach((node) => {
       node.classList.toggle('is-active', (node as HTMLElement).dataset.sessionId === sessionId);
     });
-    lastUsageTotals = sumUsage(session.messages);
+    lastUsageTotals = sumUsage([...session.messages, ...(session.interrupted_calls ?? [])]);
     accumulatedTokens = lastUsageTotals.messages + lastUsageTotals.cacheCreate + lastUsageTotals.output;
     void updateContext(accumulatedTokens);
   } catch (error) {

@@ -66,6 +66,26 @@ prefix = os.environ.get("DCX_FAKE_CHAT_PREFIX", "resposta")
 text = "%s-%d" % (prefix, count)
 first = text[:4]
 rest = text[4:]
+if os.environ.get("DCX_FAKE_CHAT_OVERFLOW") == "1":
+    for index in range(2):
+        event = {
+            "type": "assistant",
+            "message": {
+                "usage": {
+                    "input_tokens": 42,
+                    "output_tokens": 7,
+                    "cache_creation_input_tokens": 3,
+                    "cache_read_input_tokens": 11,
+                },
+                "content": [{
+                    "type": "tool_use",
+                    "id": "overflow-%d" % index,
+                    "name": "Read",
+                    "input": {"file_path": "README.md"},
+                }],
+            },
+        }
+        print(json.dumps(event), flush=True)
 if os.environ.get("DCX_FAKE_CHAT_NARRATE") == "1":
     narration = "I'll read the README.md file."
     print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": narration}, {"type": "tool_use", "id": "tool-1", "name": "Read", "input": {"file_path": "README.md"}}]}}), flush=True)
@@ -378,4 +398,36 @@ fn chat_stores_only_the_final_answer_not_pre_tool_narration() {
         .find(|message| message["role"] == "assistant")
         .expect("resposta do assistente");
     assert_eq!(assistant["content"], "resposta-1");
+}
+
+#[test]
+fn interrupted_tool_limit_persists_partial_usage_and_marks_cost_unknown() {
+    let project = unique_dir("chat-tool-limit");
+    let fake = write_fake_claude(&project);
+
+    let output = run_chat_with_env(
+        &project,
+        &["chat"],
+        "olá\n/exit\n",
+        &fake,
+        &[
+            ("DCX_CHAT_MAX_TOOL_CALLS", "1"),
+            ("DCX_FAKE_CHAT_OVERFLOW", "1"),
+        ],
+    );
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("custo exato indisponível"));
+
+    let (_, session) = only_session(&project);
+    let calls = session["interrupted_calls"]
+        .as_array()
+        .expect("tentativa interrompida salva");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["reason"], "tool_limit");
+    assert_eq!(calls[0]["cost_usd"], serde_json::Value::Null);
+    assert_eq!(calls[0]["cost_complete"], false);
+    assert_eq!(calls[0]["input_tokens"], 42);
+    assert_eq!(calls[0]["output_tokens"], 7);
+    assert_eq!(calls[0]["cache_creation_input_tokens"], 3);
+    assert_eq!(calls[0]["cache_read_input_tokens"], 11);
 }

@@ -45,6 +45,25 @@ pub struct ChatSession {
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
     pub messages: Vec<ChatMessage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interrupted_calls: Vec<InterruptedCall>,
+}
+
+/// Usage received before a provider call was stopped; cost is unknown until
+/// the provider sends its final result event.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InterruptedCall {
+    pub created_at_unix_ms: u64,
+    pub provider: String,
+    pub model: Option<String>,
+    pub reason: String,
+    pub cost_usd: Option<f64>,
+    pub cost_complete: bool,
+    pub duration_ms: u64,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cache_creation_input_tokens: Option<u64>,
+    pub cache_read_input_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -117,6 +136,7 @@ pub struct ClaudeChatProvider {
     model: Option<String>,
     web_enabled: bool,
     max_tool_calls: usize,
+    interrupted_usage: Option<InterruptedCall>,
 }
 
 impl ClaudeChatProvider {
@@ -159,6 +179,7 @@ impl ClaudeChatProvider {
                 .and_then(|value| value.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(16),
+            interrupted_usage: None,
         })
     }
 
@@ -168,6 +189,10 @@ impl ClaudeChatProvider {
 
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
+    }
+
+    fn take_interrupted_usage(&mut self) -> Option<InterruptedCall> {
+        self.interrupted_usage.take()
     }
 }
 
@@ -372,9 +397,29 @@ impl ClaudeChatProvider {
                             ) {
                                 tool_calls += 1;
                                 if tool_calls > self.max_tool_calls {
+                                    self.interrupted_usage = Some(InterruptedCall {
+                                        created_at_unix_ms: now_ms(),
+                                        provider: self.backend.provider_name().to_owned(),
+                                        model: self.model.clone(),
+                                        reason: "tool_limit".to_owned(),
+                                        cost_usd: None,
+                                        cost_complete: false,
+                                        duration_ms: started.elapsed().as_millis() as u64,
+                                        input_tokens: usage_value(&value, "input_tokens"),
+                                        output_tokens: usage_value(&value, "output_tokens"),
+                                        cache_creation_input_tokens: usage_value(
+                                            &value,
+                                            "cache_creation_input_tokens",
+                                        ),
+                                        cache_read_input_tokens: usage_value(
+                                            &value,
+                                            "cache_read_input_tokens",
+                                        ),
+                                    });
                                     let _ = child.kill();
+                                    let _ = child.wait();
                                     return Err(format!(
-                                        "limite de chamadas de ferramenta atingido ({})",
+                                        "limite de chamadas de ferramenta atingido ({}); uso parcial salvo, custo exato indisponível porque o provider não concluiu a resposta",
                                         self.max_tool_calls
                                     ));
                                 }
@@ -531,6 +576,14 @@ fn system_prompt(workspace: &Path, web_enabled: bool, context_workspaces: &[Path
     prompt
 }
 
+fn usage_value(value: &Value, name: &str) -> Option<u64> {
+    value
+        .get("message")
+        .and_then(|message| message.get("usage"))
+        .and_then(|usage| usage.get(name))
+        .and_then(Value::as_u64)
+}
+
 fn delta_text(value: &Value) -> Option<&str> {
     let event = value.get("event")?;
     if event.get("type")?.as_str()? != "content_block_delta" {
@@ -660,6 +713,10 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
                 save_session(&workspace, &mut session)?;
             }
             Err(error) => {
+                if let Some(call) = provider.take_interrupted_usage() {
+                    session.interrupted_calls.push(call);
+                    save_session(&workspace, &mut session)?;
+                }
                 println!();
                 eprintln!("Erro: {error}");
             }
@@ -961,7 +1018,17 @@ pub fn send_message_with_context(
         prompt
             .push_str("\n[FIM DO CONTEXTO WEB]\nUse as fontes acima e cite as URLs na resposta.\n");
     }
-    let reply = provider.send_with_context(workspace, &prompt, &context_workspaces, on_event)?;
+    let reply = match provider.send_with_context(workspace, &prompt, &context_workspaces, on_event)
+    {
+        Ok(reply) => reply,
+        Err(error) => {
+            if let Some(call) = provider.take_interrupted_usage() {
+                session.interrupted_calls.push(call);
+                save_session(workspace, session)?;
+            }
+            return Err(error);
+        }
+    };
     session.messages.push(ChatMessage {
         role: "assistant".to_owned(),
         content: reply.text.clone(),
@@ -1050,6 +1117,7 @@ fn new_session(workspace: &Path) -> Result<ChatSession, String> {
         created_at_unix_ms: timestamp,
         updated_at_unix_ms: timestamp,
         messages: Vec::new(),
+        interrupted_calls: Vec::new(),
     })
 }
 
