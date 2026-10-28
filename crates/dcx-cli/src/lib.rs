@@ -188,6 +188,12 @@ pub fn run(mut args: impl Iterator<Item = String>) {
                     std::process::exit(1);
                 }
             }
+            Some("--demo-parallel") if args.next().is_none() => {
+                if let Err(error) = interactive::run_parallel_demo() {
+                    eprintln!("Falha no demo paralelo: {error}");
+                    std::process::exit(1);
+                }
+            }
             Some("--pilot") if args.next().is_none() => {
                 if let Err(error) = demo::run_pilot() {
                     eprintln!("Falha no piloto: {error}");
@@ -241,7 +247,7 @@ pub fn run(mut args: impl Iterator<Item = String>) {
             }
             _ => {
                 eprintln!(
-                    "Uso: dcx run < --demo | --pilot | --request <pedido> | --from-session <session_id> >"
+                    "Uso: dcx run < --demo | --demo-parallel | --pilot | --request <pedido> | --from-session <session_id> >"
                 );
                 std::process::exit(2);
             }

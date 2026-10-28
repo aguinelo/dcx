@@ -17,7 +17,7 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R10 | Loops longos: limites por run, fila finita, recuperação após reinício, orçamento global e painel de filas | concluída |
 | R11 | Qualidade medida: e2e com provider real, evals com `pass@k`, sensores de observabilidade e linha de base | concluída (base); evolução em R14 |
 | R12 | Custo por resposta | concluída: redução medida de cerca de 70%, sem queda nos checks da eval |
-| R13 | Pendências do motor | planejada |
+| R13 | Pendências do motor | concluída: tentativas interrompidas preservam o uso parcial, e a demo paralela roda sem token |
 | R14 | Evals completos | planejada |
 | R15 | Distribuição | em andamento; depende de repositório remoto e conta Apple |
 
@@ -32,7 +32,7 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 - **R10:** cada run respeita teto de chamadas, custo conhecido e duração; uma fila de até 25 tarefas retoma do ponto em que parou, inclusive após o daemon reiniciar; o orçamento global soma todas as tarefas; o app mostra cada fila e permite pausar entre tarefas e retomar.
 - **R11:** `tools/e2e` e `tools/eval` rodam com token real e geram bundles que os sensores de `tools/observe` auditam; a linha de base fica em `docs/testing.md`.
 - **R12:** o custo fixo por resposta (hoje ~18 mil tokens de entrada, ~US$ 0,07) cai de forma mensurável, com eval antes e depois e sem regressão de qualidade.
-- **R13:** o custo das chamadas interrompidas pelo limite de ferramentas é registrado em vez de sumir; a demo live do plano paralelo (pendência de R8) roda de ponta a ponta.
+- **R13:** uma tentativa interrompida pelo limite salva os tokens já informados e registra custo desconhecido quando o provider não entrega o valor final; `dcx run --demo-parallel` demonstra dois passos concorrentes e a integração, sem token e sem alterar o projeto atual.
 - **R14:** respostas abertas são avaliadas por um juiz com rubrica; a suíte reprova quando a qualidade cai abaixo da linha de base; MiniMax e Claude são comparados lado a lado; o fluxo completo `dcx run` e o app empacotado têm e2e.
 - **R15:** o repositório tem remoto e CI rodando; o app tem canal de releases e atualização automática; com credenciais Apple, o DMG sai notarizado.
 
@@ -40,6 +40,5 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 
 Ordem planejada, sem datas: cada rodada começa quando a anterior fecha com testes verdes.
 
-1. **R13 — Pendências do motor.** Fecha o gasto invisível e a demo pendente de R8.
-2. **R14 — Evals completos.** Juiz, limiar de regressão, comparação de modelos e e2e do run completo.
-3. **R15 — Distribuição.** Começa quando o repositório remoto existir; a notarização depende da conta Apple.
+1. **R14 — Evals completos.** Juiz, limiar de regressão, comparação de modelos e e2e do run completo.
+2. **R15 — Distribuição.** Começa quando o repositório remoto existir; a notarização depende da conta Apple.

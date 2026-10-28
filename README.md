@@ -53,6 +53,12 @@ O dcode esclarece dúvidas e pede sua aprovação dos critérios antes de implem
 cargo run -p dcx-cli -- resume --run ID_DO_RUN
 ```
 
+Para ver, sem token e sem alterar o projeto atual, como dois passos independentes rodam em paralelo e depois são integrados:
+
+```sh
+cargo run -p dcx-cli -- run --demo-parallel
+```
+
 Se o app ou o daemon reiniciar durante um run, o dcode retoma o trabalho já salvo. Se o contrato ainda não estiver aprovado, a conversa recomeça e pede sua aprovação novamente.
 
 ## Rodar uma fila de tarefas

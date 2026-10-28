@@ -3,25 +3,212 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::events::EventLog;
 use crate::lock::ProjectLock;
 use crate::metrics;
 use crate::providers::{self, Analyst};
 use dcx_artifacts::{
-    Answer, ContractBundle, DeliveryReport, DisputeDecision, Plan, SCHEMA_VERSION, SensorDispute,
-    SensorImplementation, SensorLock, SensorVisibility, Understanding, resolve_sensor_dispute,
+    Answer, Contract, ContractBundle, Criterion, CriterionVerdict, DeliveryReport, DisputeDecision,
+    Plan, PlanStep, SCHEMA_VERSION, SensorDispute, SensorImplementation, SensorKind, SensorLock,
+    SensorSpec, SensorSuite, SensorType, SensorVisibility, StepReport, Understanding,
+    resolve_sensor_dispute,
 };
 use dcx_engine::{
     RunCoordinator, RunExecution, RunLifecycle, RunParticipants, RunRequest, RunState,
     check_sensors_fail,
 };
 use dcx_sensors::ScriptSensorRunner;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::workspace;
 
 type InteractiveResult<T> = Result<T, Box<dyn Error>>;
+
+/// Runs the real plan executor against a deterministic local worker so the
+/// parallel-workflow demo needs no provider token and never touches a project.
+pub fn run_parallel_demo() -> InteractiveResult<()> {
+    let root = std::env::temp_dir().join(format!("dcx-parallel-demo-{}", std::process::id()));
+    if root.exists() {
+        fs::remove_dir_all(&root)?;
+    }
+    let base = root.join("project");
+    let run_root = root.join("run");
+    let event_dir = root.join("events");
+    fs::create_dir_all(&base)?;
+    fs::write(
+        base.join("README.md"),
+        "Demonstração local de execução paralela.\n",
+    )?;
+    let bundle = parallel_demo_bundle();
+    let plan = parallel_demo_plan();
+    let executor = ParallelDemoExecutor::default();
+    let mut events = EventLog::create(&event_dir, "parallel-demo")?;
+    let execution = execute_plan(PlanExecution {
+        base: &base,
+        run_root: &run_root,
+        plan: &plan,
+        bundle: &bundle,
+        skip: &BTreeSet::new(),
+        executor: &executor,
+        events: &mut events,
+    })?;
+    if !execution.verdict.approved || executor.max_active.load(Ordering::SeqCst) < 2 {
+        let _ = fs::remove_dir_all(&root);
+        return Err("a demonstração não confirmou paralelismo e integração".into());
+    }
+    let files = ["one.txt", "two.txt", "integrate.txt"];
+    if files.iter().any(|name| !base.join(name).is_file()) {
+        let _ = fs::remove_dir_all(&root);
+        return Err("a demonstração não integrou todos os arquivos".into());
+    }
+    println!(
+        "Os dois passos rodaram em paralelo (até {} ao mesmo tempo).",
+        executor.max_active.load(Ordering::SeqCst)
+    );
+    println!("A integração final reuniu os 3 arquivos na cópia temporária.");
+    println!("Nenhum provider ou token foi usado; o projeto atual não foi alterado.");
+    fs::remove_dir_all(&root)?;
+    Ok(())
+}
+
+#[derive(Default)]
+struct ParallelDemoExecutor {
+    active: AtomicUsize,
+    max_active: AtomicUsize,
+}
+
+impl StepExecutor for ParallelDemoExecutor {
+    fn execute(
+        &self,
+        step: &PlanStep,
+        contract: &Contract,
+        _suite: &SensorSuite,
+        workspace: &Path,
+    ) -> Result<RunExecution, String> {
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_active.fetch_max(active, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(80));
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        let file = format!("{}.txt", step.id);
+        fs::write(workspace.join(&file), step.id.as_bytes()).map_err(|error| error.to_string())?;
+        Ok(RunExecution {
+            step_reports: vec![StepReport {
+                schema_version: SCHEMA_VERSION,
+                step_id: step.id.clone(),
+                attempts: 1,
+                summary: format!("Passo {} concluído na demonstração.", step.id),
+                files_changed: vec![file],
+                decisions: vec![],
+                disputes: vec![],
+            }],
+            sensor_results: vec![],
+            verdict: dcx_artifacts::Verdict {
+                schema_version: SCHEMA_VERSION,
+                approved: true,
+                criteria: contract
+                    .criteria
+                    .iter()
+                    .map(|criterion| CriterionVerdict {
+                        criterion_id: criterion.id.clone(),
+                        passed: true,
+                        evidence: vec!["resultado local da demonstração".into()],
+                    })
+                    .collect(),
+                issues: vec![],
+                notes: vec![],
+            },
+            states: vec![RunState::AwaitingMerge],
+        })
+    }
+}
+
+fn parallel_demo_bundle() -> ContractBundle {
+    let criteria = ["one", "two"]
+        .map(|id| Criterion {
+            id: id.into(),
+            description: format!("demonstrar o passo {id}"),
+        })
+        .to_vec();
+    let sensors = criteria
+        .iter()
+        .flat_map(|criterion| {
+            ["visible", "hidden"].map(|visibility| SensorSpec {
+                id: format!("{}-{visibility}", criterion.id),
+                criterion_id: criterion.id.clone(),
+                sensor_type: SensorType::Test,
+                kind: SensorKind::Computational,
+                visibility: if visibility == "visible" {
+                    SensorVisibility::Visible
+                } else {
+                    SensorVisibility::Hidden
+                },
+                purpose: "demonstração".into(),
+                check: "o arquivo do passo existe".into(),
+            })
+        })
+        .collect();
+    ContractBundle {
+        schema_version: SCHEMA_VERSION,
+        contract: Contract {
+            schema_version: SCHEMA_VERSION,
+            objective: "demonstrar passos independentes e integração".into(),
+            assumptions: vec![],
+            criteria,
+            interface: serde_json::Value::Null,
+            constraints: vec![],
+            out_of_scope: vec![],
+        },
+        sensor_suite: SensorSuite {
+            schema_version: SCHEMA_VERSION,
+            sensors,
+        },
+    }
+}
+
+fn parallel_demo_plan() -> Plan {
+    let step = |id: &str, criterion: &str, depends_on: Vec<String>| PlanStep {
+        id: id.into(),
+        title: if id == "integrate" {
+            "Integrar resultados".into()
+        } else {
+            format!("Criar arquivo {id}")
+        },
+        description: format!("Demonstração do passo {id}"),
+        criteria: if id == "integrate" {
+            vec!["one".into(), "two".into()]
+        } else {
+            vec![criterion.into()]
+        },
+        sensors: if id == "integrate" {
+            vec![
+                "one-visible".into(),
+                "one-hidden".into(),
+                "two-visible".into(),
+                "two-hidden".into(),
+            ]
+        } else {
+            vec![
+                format!("{criterion}-visible"),
+                format!("{criterion}-hidden"),
+            ]
+        },
+        depends_on,
+        files_hint: vec![],
+    };
+    Plan {
+        schema_version: SCHEMA_VERSION,
+        contract_version: SCHEMA_VERSION,
+        steps: vec![
+            step("one", "one", vec![]),
+            step("two", "two", vec![]),
+            step("integrate", "", vec!["one".into(), "two".into()]),
+        ],
+        integration_step_id: "integrate".into(),
+        rationale: "Os dois primeiros passos são independentes e podem rodar em paralelo.".into(),
+    }
+}
 
 pub fn run(request: &str) -> InteractiveResult<()> {
     run_tracked(request, |_| Ok(()))
