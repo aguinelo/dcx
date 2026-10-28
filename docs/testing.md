@@ -22,9 +22,11 @@ O runner usa `target/debug/dcx` por padrão. Defina `DCX_BIN` para usar outro bi
 O e2e real cobre:
 
 - `dcx chat` com provider real, streaming, persistência de sessão e ausência de escrita no projeto;
-- daemon `dcxd`, `/health`, `POST /chat` via SSE, evento `done` e sessão visível em `/sessions`.
+- daemon `dcxd`, `/health`, `POST /chat` via SSE, evento `done` e sessão visível em `/sessions`;
+- `dcx run --request` num projeto temporário: contrato, sensores, plano, execução, arquivo final e merge gate. A aprovação automática existe apenas nesse workspace descartável; o script confere o resultado e rejeita alterações extras;
+- coleta do run e sensores de observabilidade, mesmo quando o run falha ou é interrompido.
 
-Ele ainda não cobre a interface Electron empacotada, o fluxo completo de contrato/execução, terminal, rotinas ou GitHub.
+Ele ainda não cobre a interface Electron empacotada, terminal, rotinas ou GitHub.
 
 ```sh
 DCX_E2E=1 \
@@ -220,11 +222,15 @@ Na repetição 3× da integração, o juiz e os checks aprovaram 13/15 tentativa
 
 Os valores variam por execução. O controle negativo reprovou os seis sensores no fixture defeituoso nas duas rodadas. O coletor também foi validado em um `dcx run --request` completo com Codex falso: 7/7 checks do bundle, 6/6 sensores e estado final `awaiting_merge`.
 
+Os tempos de E2E na tabela acima são da versão anterior, que cobria apenas chat e daemon. A medição real de `dcx run` começou na tentativa abaixo e ainda não tem uma execução completa aprovada.
+
+Na primeira tentativa de `dcx run --request` real com MiniMax, três chamadas custaram US$ 0,7665 e levaram cerca de 215 s. O contrato gerado para criar um único arquivo trouxe nove sensores, incluindo verificações ligadas ao PID do teste e ao conteúdo interno do lock. Interrompi a tentativa antes da autoria dos sensores terminar; ela **não** passou pelo fluxo completo. O runner foi ajustado para preservar relatório e bundle em runs incompletos. Não repeti a chamada para evitar custo sem corrigir antes esse desvio.
+
 ## O que ainda falta
 
 - E2E da interface Electron e do DMG empacotado.
-- E2E do fluxo completo `run --request` com contrato, sensores, plano, execução e merge gate.
-- Automatizar a coleta de `.dcx/runs/<id>` no e2e e no CI; hoje o coletor é manual.
+- Repetir o e2e completo `run --request` depois de corrigir a geração de contrato/sensores para pedidos simples; a primeira tentativa MiniMax foi interrompida e não deve ser tratada como aprovada.
+- Automatizar a coleta de `.dcx/runs/<id>` no CI.
 - Corrigir e repetir a resposta read-only do MiniMax, que falhou em 2/3 tentativas na suite julgada; depois criar uma linha de base versionada para notas abertas.
 - Threshold de regressão por suite e histórico versionado de resultados.
 - Cobertura de terminal, rotinas, GitHub e recuperação de runs no e2e real.
