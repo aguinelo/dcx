@@ -13,7 +13,13 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R6 | Isolamento de ambiente e sandbox opt-in dos sensores | concluída no macOS e Linux |
 | R7 | Provider `auto`, CI e documentação operacional | concluída |
 | R8 | Passos paralelos, retomada e múltiplos runs | concluída; demo live de plano paralelo pendente |
-| R9 | Sessão conversacional read-only e base do app desktop | em andamento (M9.1 e M9.2 concluídos) |
+| R9 | Sessão conversacional read-only e base do app desktop | concluída |
+| R10 | Loops longos: limites por run, fila finita, recuperação após reinício, orçamento global e painel de filas | concluída |
+| R11 | Qualidade medida: e2e com provider real, evals com `pass@k`, sensores de observabilidade e linha de base | concluída (base); evolução em R14 |
+| R12 | Custo por resposta | próxima |
+| R13 | Pendências do motor | planejada |
+| R14 | Evals completos | planejada |
+| R15 | Distribuição | em andamento; depende de repositório remoto e conta Apple |
 
 ## Critérios de saída
 
@@ -22,8 +28,19 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 - **R6:** sensores não herdam o ambiente do usuário e podem rodar sob `sandbox-exec` no macOS ou `bwrap` no Linux, com rede e escrita fora do workspace bloqueadas.
 - **R7:** `DCX_PROVIDER=auto` tenta Claude e cai para Codex; CI roda fmt, testes, clippy, schemas e as demos; cada run registra chamadas, latência e custo conhecido em `metrics.json`.
 - **R8:** passos independentes executam em worktrees separadas; um run interrompido retoma do último passo concluído; dois runs concorrentes não colidem.
-- **R9:** `dcx chat` mantém sessão persistente, streama a resposta, retoma histórico e não altera arquivos fora de `.dcx/sessions`; `dcx serve` expõe a mesma sessão por SSE local; o modo usa Claude/MiniMax em `plan` com apenas `Read`, `Glob` e `Grep`.
+- **R9:** `dcx chat` mantém sessão persistente, streama a resposta, retoma histórico e não altera arquivos fora de `.dcx/sessions`; `dcxd` expõe a mesma sessão por SSE local; o modo usa Claude/MiniMax em `plan` com apenas `Read`, `Glob` e `Grep`; uma conversa pode ser promovida para run com aprovação explícita.
+- **R10:** cada run respeita teto de chamadas, custo conhecido e duração; uma fila de até 25 tarefas retoma do ponto em que parou, inclusive após o daemon reiniciar; o orçamento global soma todas as tarefas; o app mostra cada fila e permite pausar entre tarefas e retomar.
+- **R11:** `tools/e2e` e `tools/eval` rodam com token real e geram bundles que os sensores de `tools/observe` auditam; a linha de base fica em `docs/testing.md`.
+- **R12:** o custo fixo por resposta (hoje ~18 mil tokens de entrada, ~US$ 0,07) cai de forma mensurável, com eval antes e depois e sem regressão de qualidade.
+- **R13:** o custo das chamadas interrompidas pelo limite de ferramentas é registrado em vez de sumir; a demo live do plano paralelo (pendência de R8) roda de ponta a ponta.
+- **R14:** respostas abertas são avaliadas por um juiz com rubrica; a suíte reprova quando a qualidade cai abaixo da linha de base; MiniMax e Claude são comparados lado a lado; o fluxo completo `dcx run` e o app empacotado têm e2e.
+- **R15:** o repositório tem remoto e CI rodando; o app tem canal de releases e atualização automática; com credenciais Apple, o DMG sai notarizado.
 
-## Próxima rodada
+## Próximas rodadas
 
-M9.1 e M9.2 entregam conversa read-only e daemon local. O próximo passo é M9.3: catálogo real de sessões e promoção explícita de conversa para run, para que o app desktop consuma projeto e início de execução sem reimplementar o motor.
+Ordem planejada, sem datas: cada rodada começa quando a anterior fecha com testes verdes.
+
+1. **R12 — Custo por resposta.** Retorno imediato em toda conversa.
+2. **R13 — Pendências do motor.** Fecha o gasto invisível e a demo pendente de R8.
+3. **R14 — Evals completos.** Juiz, limiar de regressão, comparação de modelos e e2e do run completo.
+4. **R15 — Distribuição.** Começa quando o repositório remoto existir; a notarização depende da conta Apple.

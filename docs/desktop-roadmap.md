@@ -13,6 +13,7 @@ de conversa e execução.
 | 3. Troca de workspace | Concluída | Itens locais em Workspaces são selecionáveis; o seletor nativo adiciona qualquer pasta; histórico, configurações e conversas usam o projeto escolhido; workspaces recentes persistem entre aberturas. |
 | 4. Ferramentas da interface | Concluída | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON, busca local, rotinas com agendamento recorrente de 1 h a 7 dias e retomada de runs após reinício do daemon. |
 | 5. Distribuição | Em andamento | Empacotamento macOS reproduzível em DMG, CLI dcode incluído, ícone próprio e daemon local iniciado automaticamente. Assinatura/notarização condicionais estão implementadas; credenciais Apple e canal de atualização automática ainda são pendências externas. |
+| 6. Filas | Concluída | Seção Filas no painel mostra progresso, gasto contra cada limite e motivo da pausa; Pausar para antes da próxima tarefa e Retomar continua em segundo plano. |
 
 ## Critérios de conclusão
 
@@ -27,6 +28,7 @@ de conversa e execução.
 - Runs em andamento são retomados após o reinício do daemon; se o contrato ainda não foi aprovado, o fluxo recomeça e pede aprovação novamente.
 - O DMG de desenvolvimento inclui o CLI do dcode; o app inicia o daemon local quando o endpoint padrão está indisponível e não assume controle de endpoints customizados.
 - O app usa ícone próprio; sem credenciais Apple o build continua reproduzível com assinatura ad-hoc, e com identidade Developer ID + credenciais o hook notariza e aplica o ticket.
+- A seção Filas lista as filas do workspace com progresso e gasto; Pausar nunca interrompe uma tarefa no meio, e Retomar é recusado se a fila já estiver rodando.
 - A interface não apresenta dados simulados como se fossem dados reais.
 - `cd desktop && npm run typecheck && npm run build` passa antes de cada entrega.
 
