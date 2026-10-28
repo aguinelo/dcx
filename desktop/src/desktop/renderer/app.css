@@ -580,12 +580,58 @@ button {
   line-height: var(--lh-body-sm);
   padding: 4px 0 2px;
 }
+.thinking__body {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+}
+.thinking__body:empty,
+.thinking.is-collapsed .thinking__body {
+  display: none;
+}
+.thinking.is-collapsed .thinking__chevron {
+  transform: rotate(-90deg);
+}
+.action-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+.action-step__mark {
+  width: 16px;
+  flex: none;
+  color: var(--faint);
+  text-align: center;
+}
+.action-step__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.action-step--running .action-step__mark {
+  color: var(--accent);
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+.action-step--done .action-step__mark {
+  color: var(--ok);
+}
+.action-step--error .action-step__mark {
+  color: var(--danger);
+}
 .thinking__summary {
   display: flex;
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 2px 0;
+  margin-top: 12px;
+  padding: 2px 5px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -601,37 +647,19 @@ button {
   color: var(--faint);
   font-size: 17px;
   line-height: 1;
-  transition: transform 0.15s ease;
-}
-.thinking.is-collapsed .thinking__chevron {
-  transform: rotate(-90deg);
 }
 .thinking__label {
-  flex: none;
-}
-.thinking__meta {
-  color: var(--faint);
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.thinking__body {
-  margin: 5px 0 0 7px;
-  padding: 2px 0 2px 14px;
-  border-left: 1px solid var(--border-strong);
-  display: grid;
-  gap: 8px;
-}
-.thinking.is-collapsed .thinking__body {
-  display: none;
-}
-.thinking__status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: var(--fs-body-sm);
+.thinking__elapsed {
+  color: var(--faint);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .thinking__spinner {
   color: var(--accent);
@@ -640,6 +668,10 @@ button {
 .thinking--done .thinking__spinner {
   animation: none;
   color: var(--ok);
+}
+.thinking--error .thinking__spinner {
+  animation: none;
+  color: var(--danger);
 }
 @keyframes thinking-pulse {
   0%, 100% { opacity: 0.35; }

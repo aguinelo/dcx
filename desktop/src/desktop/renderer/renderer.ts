@@ -7,6 +7,7 @@
 
 import type { DcxLoopSummary } from '../../dcx/client.ts';
 import { describeLoop } from './loops.ts';
+import { describeActivity, describeProgress, formatActivityElapsed } from './activity.ts';
 import type { BackgroundTask } from './mock.ts';
 
 interface AgentEventPayload {
@@ -108,9 +109,8 @@ let streamingPendingText = '';
 let streamFlushTimer: number | undefined;
 let thinkingNode: HTMLElement | undefined;
 let thinkingBody: HTMLElement | undefined;
-let thoughtCount = 0;
-let commandCount = 0;
-let editCount = 0;
+let activityStartedAt = 0;
+let activityTimer: number | undefined;
 let currentProjects: Array<{ path: string }> = [];
 let terminalWorkspaceDisplayed = '';
 let selectedArtifactRun: string | undefined;
@@ -611,12 +611,11 @@ async function loadSession(workspace: string, sessionId: string): Promise<void> 
     currentWorkspace = workspace;
     currentSessionId = sessionId;
     el<HTMLButtonElement>('promote-run').hidden = false;
+    clearThinking();
     thread.replaceChildren();
     streamingAssistantBody = undefined;
     streamingAssistantText = '';
     streamingPendingText = '';
-    thinkingNode = undefined;
-    thinkingBody = undefined;
     for (const message of session.messages) {
       if (message.role === 'user') addUserMessage(message.content);
       else addAssistantMessage(message.content, false);
@@ -662,12 +661,11 @@ async function switchWorkspace(workspace: string): Promise<void> {
   if (!workspace || workspace === currentWorkspace || busy) return;
   currentWorkspace = workspace;
   currentSessionId = undefined;
+  clearThinking();
   thread.replaceChildren();
   streamingAssistantBody = undefined;
   streamingAssistantText = '';
   streamingPendingText = '';
-  thinkingNode = undefined;
-  thinkingBody = undefined;
   accumulatedTokens = 0;
   lastUsageTotals = { messages: 0, cacheCreate: 0, output: 0 };
   el<HTMLButtonElement>('promote-run').hidden = true;
@@ -1221,11 +1219,7 @@ function blockMarkup(text: string): string {
 
 function addUserMessage(text: string): void {
   flushAssistantStream();
-  if (thinkingNode) {
-    thinkingNode.remove();
-    thinkingNode = undefined;
-  }
-  thinkingBody = undefined;
+  clearThinking();
   streamingAssistantBody = undefined;
   streamingAssistantText = '';
   streamingPendingText = '';
@@ -1275,19 +1269,15 @@ function flushAssistantStream(): void {
   scrollToEnd();
 }
 
-function addActivity(id: string, name: string, detail = ''): HTMLElement {
+function addActivity(id: string, name: string, input: unknown): HTMLElement {
   setThinking(true);
-  const lowerName = name.toLowerCase();
-  thoughtCount += 1;
-  if (lowerName.includes('run') || lowerName.includes('shell') || lowerName.includes('command')) commandCount += 1;
-  if (lowerName.includes('edit') || lowerName.includes('write')) editCount += 1;
-  updateThoughtSummary();
-  const node = row(
-    'activity activity--running',
-    `<span class="activity__glyph">◆</span><span>${escapeHtml(name)}</span>${detail ? `<span class="activity__detail">${escapeHtml(detail)}</span>` : ''}`,
+  const label = describeActivity(name, input);
+  const node = row('action-step action-step--running',
+    `<span class="action-step__mark" aria-hidden="true">◌</span><span class="action-step__label">${escapeHtml(label)}</span>`,
   );
   node.dataset.id = id;
   (thinkingBody ?? thread).append(node);
+  setActivityStatus(label);
   scrollToEnd();
   return node;
 }
@@ -1296,19 +1286,39 @@ function finishActivity(id: string, ok: boolean, detail: string): void {
   const node = thread.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`);
   if (!node) return;
 
-  node.classList.remove('activity--running');
-  node.classList.add(ok ? 'activity--ok' : 'activity--error');
+  node.classList.remove('action-step--running');
+  node.classList.add(ok ? 'action-step--done' : 'action-step--error');
 
-  const glyph = node.querySelector('.activity__glyph');
-  if (glyph) glyph.textContent = ok ? '●' : '▲';
+  const mark = node.querySelector('.action-step__mark');
+  if (mark) mark.textContent = ok ? '✓' : '×';
+  if (detail) node.title = firstLine(detail);
+  setActivityStatus('Preparando resposta…');
+}
 
-  let detailNode = node.querySelector('.activity__detail');
-  if (!detailNode) {
-    detailNode = document.createElement('span');
-    detailNode.className = 'activity__detail';
-    node.append(detailNode);
+function setActivityStatus(label: string, resetClock = false): void {
+  if (!thinkingNode) return;
+  const status = thinkingNode.querySelector<HTMLElement>('.thinking__label');
+  const elapsed = thinkingNode.querySelector<HTMLElement>('.thinking__elapsed');
+  if (status) status.textContent = label;
+  if (resetClock || activityStartedAt === 0) activityStartedAt = Date.now();
+  if (elapsed) elapsed.textContent = formatActivityElapsed(Date.now() - activityStartedAt);
+  if (activityTimer === undefined) {
+    activityTimer = window.setInterval(() => {
+      const current = thinkingNode?.querySelector<HTMLElement>('.thinking__elapsed');
+      if (current && activityStartedAt) current.textContent = formatActivityElapsed(Date.now() - activityStartedAt);
+    }, 1000);
   }
-  detailNode.textContent = detail;
+}
+
+function clearThinking(): void {
+  if (activityTimer !== undefined) {
+    window.clearInterval(activityTimer);
+    activityTimer = undefined;
+  }
+  thinkingNode?.remove();
+  thinkingNode = undefined;
+  thinkingBody = undefined;
+  activityStartedAt = 0;
 }
 
 function scrollToEnd(): void {
@@ -1421,17 +1431,12 @@ bridge.onEvent((payload) => {
 
     case 'tool_start':
       flushAssistantStream();
-      if (payload.id) addActivity(payload.id, payload.name ?? 'tool', summarize(payload.input));
+      if (payload.id) addActivity(payload.id, payload.name ?? 'tool', payload.input);
       break;
 
     case 'progress': {
       setThinking(true);
-      const id = `progress-${Date.now()}-${thoughtCount}`;
-      const node = addActivity(id, payload.message ?? 'Processando…');
-      node.classList.remove('activity--running');
-      node.classList.add('activity--ok');
-      const glyph = node.querySelector('.activity__glyph');
-      if (glyph) glyph.textContent = '◌';
+      setActivityStatus(describeProgress(payload.message ?? ''));
       break;
     }
 
@@ -1446,7 +1451,6 @@ bridge.onEvent((payload) => {
       break;
 
     case 'text':
-      setThinking(false);
       addAssistantMessage(payload.text ?? '');
       break;
 
@@ -1455,7 +1459,7 @@ bridge.onEvent((payload) => {
       if (currentWorkspace && currentSessionId) void refreshContextFromSession(currentWorkspace, currentSessionId);
       busy = false;
       setPlaceholder();
-      setThinking(false);
+      setThinking(false, 'Concluído');
       break;
     }
 
@@ -1464,7 +1468,7 @@ bridge.onEvent((payload) => {
       showNotice('Turno interrompido', payload.message ?? 'erro desconhecido', true);
       busy = false;
       setPlaceholder();
-      setThinking(false);
+      setThinking(false, 'Interrompido');
       break;
 
     case 'run_event':
@@ -1479,13 +1483,13 @@ bridge.onEvent((payload) => {
         if (payload.runId) finishRunTask(payload.runId);
         busy = false;
         setPlaceholder();
-        setThinking(false);
+        setThinking(false, 'Run concluído');
       } else if (payload.event === 'failed' || payload.event === 'cancelled') {
         showNotice('Run encerrado', payload.event, payload.event === 'failed');
         if (payload.runId) finishRunTask(payload.runId);
         busy = false;
         setPlaceholder();
-        setThinking(false);
+        setThinking(false, 'Run encerrado');
       } else if (payload.event === 'recovered') {
         showNotice('Run retomado', 'O daemon reiniciou e o trabalho continuou de onde parou.', false);
       } else if (payload.event === 'recovery_stopped' || payload.event === 'recovery_failed') {
@@ -1493,7 +1497,7 @@ bridge.onEvent((payload) => {
         if (payload.runId) finishRunTask(payload.runId);
         busy = false;
         setPlaceholder();
-        setThinking(false);
+        setThinking(false, 'Run interrompido');
       }
       break;
 
@@ -1502,43 +1506,40 @@ bridge.onEvent((payload) => {
   }
 });
 
-function summarize(value: unknown): string {
-  const text = JSON.stringify(value) ?? '';
-  return text.length > 70 ? `${text.slice(0, 67)}...` : text;
-}
-
 function setPlaceholder(): void {
   input.placeholder = 'Digite / para comandos';
 }
 
-function setThinking(active: boolean): void {
+function setThinking(active: boolean, doneLabel = 'Concluído'): void {
   if (active && !thinkingNode) {
-    thoughtCount = 0;
-    commandCount = 0;
-    editCount = 0;
     thinkingNode = row(
       'thinking',
-      '<button class="thinking__summary" type="button" aria-expanded="true"><span class="thinking__chevron">⌄</span><span class="thinking__label">Thought process</span><span class="thinking__meta"></span></button><div class="thinking__body"></div><div class="thinking__status"><span class="thinking__spinner">◌</span><span>Noodling…</span></div>',
+      '<div class="thinking__body action-steps" aria-live="polite"></div><button class="thinking__summary" type="button" aria-expanded="true"><span class="thinking__spinner" aria-hidden="true">⠿</span><span class="thinking__label">Analisando seu pedido…</span><span class="thinking__elapsed">0 s</span><span class="thinking__chevron" aria-hidden="true">›</span></button>',
     );
     thinkingBody = thinkingNode.querySelector<HTMLElement>('.thinking__body') ?? undefined;
     thread.append(thinkingNode);
-    updateThoughtSummary();
+    activityStartedAt = Date.now();
+    setActivityStatus('Analisando seu pedido…');
     scrollToEnd();
+  } else if (active && thinkingNode) {
+    if (thinkingNode.classList.contains('thinking--done')) {
+      thinkingNode.classList.remove('thinking--done', 'thinking--error');
+      setActivityStatus('Analisando seu pedido…', true);
+      const spinner = thinkingNode.querySelector<HTMLElement>('.thinking__spinner');
+      if (spinner) spinner.textContent = '⠿';
+    }
   } else if (!active && thinkingNode) {
-    thinkingNode.classList.add('thinking--done');
-    const status = thinkingNode.querySelector<HTMLElement>('.thinking__status span:last-child');
-    if (status) status.textContent = 'Concluído';
-    updateThoughtSummary();
+    const failed = doneLabel !== 'Concluído' && doneLabel !== 'Run concluído';
+    thinkingNode.classList.toggle('thinking--done', !failed);
+    thinkingNode.classList.toggle('thinking--error', failed);
+    setActivityStatus(doneLabel);
+    const spinner = thinkingNode.querySelector<HTMLElement>('.thinking__spinner');
+    if (spinner) spinner.textContent = failed ? '×' : '✓';
+    if (activityTimer !== undefined) {
+      window.clearInterval(activityTimer);
+      activityTimer = undefined;
+    }
   }
-}
-
-function updateThoughtSummary(): void {
-  const meta = thinkingNode?.querySelector<HTMLElement>('.thinking__meta');
-  if (!meta) return;
-  const parts = [`Thought ${Math.max(1, thoughtCount)} ${thoughtCount === 1 ? 'time' : 'times'}`];
-  if (commandCount) parts.push(`Ran ${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
-  if (editCount) parts.push(`edited ${editCount} ${editCount === 1 ? 'file' : 'files'}`);
-  meta.textContent = parts.join(' · ');
 }
 
 async function promoteCurrentSession(): Promise<void> {
@@ -1587,7 +1588,7 @@ async function submit(): Promise<void> {
     );
     busy = false;
     setPlaceholder();
-    setThinking(false);
+    setThinking(false, 'Interrompido');
   }
 }
 

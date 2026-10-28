@@ -8,7 +8,7 @@ O dcode ajuda você a explorar um projeto, transformar uma ideia em uma tarefa c
 - Pedir uma mudança e acompanhar o trabalho até a revisão.
 - Organizar vários pedidos em uma fila finita, acompanhar o orçamento global e retomá-la depois de uma interrupção.
 - Escolher o modelo usado e definir limites de tempo, chamadas e custo conhecido.
-- Usar o app desktop para conversar e acompanhar o projeto.
+- Usar o app desktop para conversar, acompanhar as ações em andamento e ver quanto tempo elas levam.
 
 ## Instalar os comandos
 
