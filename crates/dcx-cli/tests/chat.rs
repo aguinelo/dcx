@@ -66,6 +66,10 @@ prefix = os.environ.get("DCX_FAKE_CHAT_PREFIX", "resposta")
 text = "%s-%d" % (prefix, count)
 first = text[:4]
 rest = text[4:]
+if os.environ.get("DCX_FAKE_CHAT_NARRATE") == "1":
+    narration = "I'll read the README.md file."
+    print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": narration}, {"type": "tool_use", "id": "tool-1", "name": "Read", "input": {"file_path": "README.md"}}]}}), flush=True)
+    print(json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "marker"}]}}), flush=True)
 print(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": first}}}), flush=True)
 print(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": rest}}}), flush=True)
 print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}), flush=True)
@@ -343,4 +347,32 @@ fn chat_uses_the_minimax_anthropic_compatible_endpoint() {
     let (_, session) = only_session(&project);
     assert_eq!(session["provider"], "minimax");
     assert_eq!(session["model"], "MiniMax-M3");
+}
+
+#[test]
+fn chat_stores_only_the_final_answer_not_pre_tool_narration() {
+    let project = unique_dir("narration");
+    let fake = write_fake_claude(&project);
+    let output = run_chat_with_env(
+        &project,
+        &["chat"],
+        "leia o README\n/exit\n",
+        &fake,
+        &[("DCX_FAKE_CHAT_NARRATE", "1")],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let (_, session) = only_session(&project);
+    let assistant = session["messages"]
+        .as_array()
+        .expect("mensagens")
+        .iter()
+        .rev()
+        .find(|message| message["role"] == "assistant")
+        .expect("resposta do assistente");
+    assert_eq!(assistant["content"], "resposta-1");
 }

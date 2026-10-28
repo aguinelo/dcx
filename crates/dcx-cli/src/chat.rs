@@ -310,7 +310,10 @@ impl ClaudeChatProvider {
         });
 
         let mut streamed = String::new();
-        let mut assistant_text = String::new();
+        // Only the last assistant message is the answer; earlier ones are the
+        // narration the model emits before a tool call.
+        let mut last_assistant_text = String::new();
+        let mut saw_assistant_text = false;
         let mut result_text = None;
         let mut saw_delta = false;
         let mut is_error = false;
@@ -381,7 +384,8 @@ impl ClaudeChatProvider {
                         }
                     }
                     if let Some(text) = message_text(&value) {
-                        assistant_text.push_str(&text);
+                        saw_assistant_text = true;
+                        last_assistant_text.clone_from(&text);
                         if !saw_delta {
                             on_event(ChatEvent::Text(text));
                         }
@@ -467,18 +471,18 @@ impl ClaudeChatProvider {
             ));
         }
 
-        let has_assistant_text = !assistant_text.trim().is_empty();
-        let text = if has_assistant_text {
-            assistant_text
-        } else if !streamed.is_empty() {
-            streamed
-        } else {
-            result_text.unwrap_or_default()
+        // The CLI's `result` is the final answer on its own. Concatenating every
+        // assistant message instead glued pre-tool narration onto the answer
+        // ("I'll read the file.DCX_EVAL_MARKER_42").
+        let text = match result_text.filter(|text| !text.trim().is_empty()) {
+            Some(result) => result,
+            None if !last_assistant_text.trim().is_empty() => last_assistant_text,
+            None => streamed,
         };
         if text.trim().is_empty() {
             return Err("Claude CLI não retornou texto para a conversa.".to_owned());
         }
-        if !saw_delta && !has_assistant_text {
+        if !saw_delta && !saw_assistant_text {
             on_event(ChatEvent::Text(text.clone()));
         }
 
@@ -498,9 +502,9 @@ fn system_prompt(workspace: &Path, web_enabled: bool, context_workspaces: &[Path
     let mut prompt = format!(
         "Você é o dcode em modo conversa read-only.\n\
          Projeto atual: {}.\n\
-         É obrigatório responder em português do Brasil (pt-BR), mesmo que o histórico, os arquivos ou a pergunta estejam em outro idioma. Não responda em inglês, salvo quando o usuário pedir explicitamente.\n\
+         É obrigatório responder em português do Brasil (pt-BR), mesmo que o histórico, os arquivos ou a pergunta estejam em outro idioma. Não responda em inglês, salvo quando o usuário pedir explicitamente. Isso vale também para as frases curtas que você escreve antes de usar uma ferramenta.\n\
          Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. {} Nunca edite, crie, apague ou execute comandos; não use Bash ou subagentes. Não altere o projeto. Faça buscas direcionadas, não repita uma busca que não encontrou resultados e leia apenas os arquivos necessários para responder.\n\
-         Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir implementação, explique que isso exige iniciar um run com contrato e sensores; não escreva arquivos.\n\
+         Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir para criar, editar, apagar arquivos ou implementar algo, recuse imediatamente, sem usar ferramentas e sem investigar o projeto para justificar: diga em uma ou duas frases que a conversa é somente leitura e que, para fazer a mudança, ele pode usar \"Promover para execução\" (ou `dcx run`), que cria um contrato com critérios de aceite antes de alterar o projeto.\n\
          Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
         workspace.display(),
         if web_enabled {
