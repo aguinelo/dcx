@@ -97,6 +97,7 @@ pub struct PromotionStatus {
 #[derive(Debug)]
 pub struct ChatReply {
     pub text: String,
+    pub model: Option<String>,
     pub cost_usd: Option<f64>,
     pub duration_ms: u64,
     pub input_tokens: Option<u64>,
@@ -355,6 +356,7 @@ impl ClaudeChatProvider {
         let mut cache_read_input_tokens = None;
         let mut parse_error = None;
         let mut tool_calls = 0_usize;
+        let mut reported_model = None;
 
         for line in BufReader::new(stdout).lines() {
             let line = match line {
@@ -383,6 +385,13 @@ impl ClaudeChatProvider {
                     }
                 }
                 Some("assistant") => {
+                    if let Some(model) = value
+                        .get("message")
+                        .and_then(|message| message.get("model"))
+                        .and_then(Value::as_str)
+                    {
+                        reported_model = Some(model.to_owned());
+                    }
                     for block in value
                         .get("message")
                         .and_then(|message| message.get("content"))
@@ -400,7 +409,9 @@ impl ClaudeChatProvider {
                                     self.interrupted_usage = Some(InterruptedCall {
                                         created_at_unix_ms: now_ms(),
                                         provider: self.backend.provider_name().to_owned(),
-                                        model: self.model.clone(),
+                                        model: reported_model
+                                            .clone()
+                                            .or_else(|| self.model.clone()),
                                         reason: "tool_limit".to_owned(),
                                         cost_usd: None,
                                         cost_complete: false,
@@ -537,6 +548,7 @@ impl ClaudeChatProvider {
 
         Ok(ChatReply {
             text,
+            model: reported_model.or_else(|| self.model.clone()),
             cost_usd,
             duration_ms: duration_ms.unwrap_or_else(|| started.elapsed().as_millis() as u64),
             input_tokens,
@@ -694,6 +706,9 @@ pub fn run(workspace_arg: Option<PathBuf>, session_id: Option<String>) -> Result
         }) {
             Ok(reply) => {
                 println!();
+                if let Some(model) = &reply.model {
+                    session.model = Some(model.clone());
+                }
                 if let Some(cost) = reply.cost_usd {
                     eprintln!("[chat: {} ms, US${cost:.4}]", reply.duration_ms);
                 } else {
@@ -1029,6 +1044,9 @@ pub fn send_message_with_context(
             return Err(error);
         }
     };
+    if let Some(model) = &reply.model {
+        session.model = Some(model.clone());
+    }
     session.messages.push(ChatMessage {
         role: "assistant".to_owned(),
         content: reply.text.clone(),

@@ -98,6 +98,15 @@ Medição mais recente com MiniMax-M3 (`--repeat 3`, 28/10/2026):
 
 Na comparação direta da suite anterior, com 12 casos e 3 repetições, o custo caiu de US$ 0,9569 para US$ 0,2910 (redução de 69,6%) e a entrada caiu de 225.635 para 60.531 tokens (redução de 73,2%). O p95 medido foi de 12,5 s antes e 14,4 s depois. A suite atualizada, com um caso novo de resposta direta, voltou a 12,7 s de p95 e passou em todas as repetições.
 
+Comparação entre providers na mesma suite, com 3 repetições por caso:
+
+| Provider e modelo | Aprovação | Custo por resposta | p95 |
+|---|---:|---:|---:|
+| MiniMax-M3 | 15/15 | US$ 0,0243 | 12,7 s |
+| Claude Opus 5.5 | 15/15 | US$ 0,0208 | 4,5 s |
+
+A comparação passou pelos limites configurados: nenhuma queda de qualidade, custo abaixo de +10% e p95 abaixo de +25%. Os resultados variam entre execuções.
+
 O chat continua respondendo em português, consultando arquivos quando necessário e sem alterar o projeto. Se custo, latência ou algum check piorar numa mudança futura, compare com estes resultados.
 
 Para comparar uma nova medição com a linha de base, rode a eval normalmente e depois:

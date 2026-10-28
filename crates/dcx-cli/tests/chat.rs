@@ -92,7 +92,8 @@ if os.environ.get("DCX_FAKE_CHAT_NARRATE") == "1":
     print(json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "marker"}]}}), flush=True)
 print(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": first}}}), flush=True)
 print(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": rest}}}), flush=True)
-print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}), flush=True)
+model = os.environ.get("ANTHROPIC_MODEL", "fake-claude-model")
+print(json.dumps({"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": text}]}}), flush=True)
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": text, "total_cost_usd": 0.001, "duration_ms": 7, "usage": {"input_tokens": 10, "output_tokens": 2}}), flush=True)
 "#;
     fs::write(&path, script).expect("escrever Claude falso");
@@ -184,6 +185,7 @@ fn chat_streams_and_persists_a_read_only_session() {
     assert_eq!(session["schema_version"], 1);
     assert_eq!(session["mode"], "explore");
     assert_eq!(session["provider"], "claude");
+    assert_eq!(session["model"], "fake-claude-model");
     let messages = session["messages"].as_array().expect("mensagens");
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0]["role"], "user");
