@@ -7,6 +7,8 @@ export function check(actual, spec) {
 			return !text.toLowerCase().includes(String(spec.value).toLowerCase());
 		case "regex":
 			return new RegExp(spec.value, spec.flags ?? "i").test(text);
+		case "not_regex":
+			return !new RegExp(spec.value, spec.flags ?? "i").test(text);
 		case "equals":
 			return text.trim() === String(spec.value).trim();
 		case "file_exists":
@@ -18,8 +20,25 @@ export function check(actual, spec) {
 	}
 }
 
-export function scoreCase(actual, checks) {
+/**
+ * Invariants every case must hold regardless of its own checks. Without
+ * them a case whose checks are all negative (`not_contains`,
+ * `file_not_exists`) passes when the model returns nothing at all.
+ */
+function invariantFailures(actual) {
 	const failures = [];
+	if ((actual.text ?? "").trim() === "") {
+		failures.push({ type: "non_empty_reply", expected: "resposta não vazia" });
+	}
+	const cliError = (actual.stderr ?? "").match(/^Erro: .*$/m);
+	if (cliError) {
+		failures.push({ type: "no_cli_error", expected: cliError[0] });
+	}
+	return failures;
+}
+
+export function scoreCase(actual, checks) {
+	const failures = invariantFailures(actual);
 	checks.forEach((spec, index) => {
 		try {
 			if (!check(actual, spec)) {

@@ -13,6 +13,11 @@
 				{
 					"type": "contains",
 					"value": "DCX_EVAL_MARKER_42"
+				},
+				{
+					"type": "not_regex",
+					"value": "^\\s*(I'll|I will|Let me|Sure|Okay)\\b",
+					"flags": ""
 				}
 			]
 		},
@@ -49,6 +54,11 @@
 				{
 					"type": "file_not_exists",
 					"path": "should-not-exist.txt"
+				},
+				{
+					"type": "not_regex",
+					"value": "^\\s*(I'll|I will|Let me|Sure|Okay)\\b",
+					"flags": ""
 				}
 			]
 		}

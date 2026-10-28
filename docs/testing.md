@@ -50,7 +50,7 @@ Essa camada é a base de eval engineering: casos versionados, checks determinís
 
 A suite fica em `evals/smoke.json` e usa checks determinísticos:
 
-- `contains`, `not_contains`, `equals` e `regex` no texto da última resposta;
+- `contains`, `not_contains`, `equals`, `regex` e `not_regex` no texto da última resposta;
 - `file_exists` e `file_not_exists` no workspace temporário do caso.
 
 Cada caso roda em um workspace isolado e pode ter `prompt` ou `turns`, além de `files` para preparar fixtures. O runner registra sessão, modelo, custo, duração e tokens quando o provider reporta. Use `--provider claude` para sobrescrever o provider da suite.
@@ -84,6 +84,21 @@ Os testes do scorer rodam sem token:
 ```sh
 node --test tools/eval/scorer.test.mjs
 ```
+
+## Linha de base
+
+Última medição com MiniMax-M3 (`--repeat 3`, 27/10/2026):
+
+| Métrica | Valor |
+|---|---|
+| Casos | 12/12 (pass@k 100%) |
+| Latência | p50 4,4 s, p95 11,3 s |
+| Custo da suíte | US$ 0,95 (cerca de US$ 0,08 por resposta) |
+| Sensores | 6/6 no eval e 6/6 no e2e |
+
+Cada resposta parte de cerca de 18 mil tokens de entrada (instruções e ferramentas), então mesmo uma resposta de uma palavra custa perto de US$ 0,07. Se a latência ou o custo subirem muito acima disso, trate como regressão.
+
+Além dos checks de cada caso, todo caso reprova quando a resposta vem vazia ou quando o CLI informa um erro, para que um caso com checks só negativos não passe quando o modelo não responde.
 
 ## Sensores de observabilidade
 

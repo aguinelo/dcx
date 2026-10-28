@@ -130,7 +130,10 @@ async function executeCase(testCase, env, binary) {
 			.find((message) => message.role === "assistant");
 		const text = assistant?.content ?? "";
 		const files = await fileState(workspace, testCase.checks);
-		const score = scoreCase({ text, files }, testCase.checks);
+		const score = scoreCase(
+			{ text, files, stderr: result.stderr },
+			testCase.checks,
+		);
 
 		return {
 			id: testCase.id,
@@ -278,7 +281,8 @@ async function main() {
 		expected: {
 			provider,
 			cases: suite.cases.map((testCase) => testCase.id),
-			max_duration_ms: 180_000,
+			repeat: args.repeat,
+			max_duration_ms: 180_000 * args.repeat,
 			max_cost_usd: 2.0,
 			max_model_calls: results.length,
 			allow_writes: false,

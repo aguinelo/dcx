@@ -104,3 +104,26 @@ test("summarize computes pass rates, pass@k, cost and latency", () => {
 	assert.equal(summary.latency_ms.p95, 300);
 	assert.equal(summary.tokens.complete, false);
 });
+
+test("not_regex rejects text that matches", () => {
+	const spec = { type: "not_regex", value: "^\\s*(I'll|Let me)\\b", flags: "" };
+	assert.equal(check({ text: "I'll read the file." }, spec), false);
+	assert.equal(check({ text: "DCX_EVAL_MARKER_42" }, spec), true);
+});
+
+test("an empty reply fails even when every check is negative", () => {
+	const actual = { text: "  ", files: new Map([["x.txt", false]]) };
+	const result = scoreCase(actual, [{ type: "file_not_exists", path: "x.txt" }]);
+	assert.equal(result.ok, false);
+	assert.equal(result.failures[0].type, "non_empty_reply");
+});
+
+test("an error reported by the CLI fails the case", () => {
+	const actual = {
+		text: "OK",
+		stderr: "Erro: limite de chamadas de ferramenta atingido (24)\n",
+	};
+	const result = scoreCase(actual, [{ type: "contains", value: "OK" }]);
+	assert.equal(result.ok, false);
+	assert.equal(result.failures[0].type, "no_cli_error");
+});

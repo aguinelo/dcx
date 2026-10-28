@@ -42,16 +42,23 @@ def main():
         elif matches[0].get("ok") is not True:
             errors.append(f"check {name!r} não passou")
 
+    repeat = expected.get("repeat", 1)
     for case_id in expected.get("cases") or []:
         matches = [
             item
             for item in bundle.get("cases") or []
             if item.get("id") == case_id
         ]
-        if len(matches) != 1:
-            errors.append(f"caso {case_id!r} aparece {len(matches)} vez(es)")
-        elif matches[0].get("ok") is not True:
-            errors.append(f"caso {case_id!r} não passou")
+        if len(matches) != repeat:
+            errors.append(
+                f"caso {case_id!r} aparece {len(matches)} vez(es), esperado {repeat}"
+            )
+        else:
+            failed = [item for item in matches if item.get("ok") is not True]
+            if failed:
+                errors.append(
+                    f"caso {case_id!r} não passou em {len(failed)} de {repeat} tentativa(s)"
+                )
 
     max_duration = expected.get("max_duration_ms")
     duration = bundle.get("duration_ms")

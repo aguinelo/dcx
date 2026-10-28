@@ -11,7 +11,7 @@
 		{
 			"sensor_id": "visible-behavior-contract",
 			"filename": "visible_behavior_contract.py",
-			"sha256": "e1ee853b9bbd6180d93df23540bccdfb45456494fa799c85594d4606b7a3bded"
+			"sha256": "11ae69fd8f161c4ef5e623c0cf78ea0a0fa9e1ce9fcd9b22d63cdfd67f2191b6"
 		},
 		{
 			"sensor_id": "visible-budget",
