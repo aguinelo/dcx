@@ -100,6 +100,16 @@ Na comparação direta da suite anterior, com 12 casos e 3 repetições, o custo
 
 O chat continua respondendo em português, consultando arquivos quando necessário e sem alterar o projeto. Se custo, latência ou algum check piorar numa mudança futura, compare com estes resultados.
 
+Para comparar uma nova medição com a linha de base, rode a eval normalmente e depois:
+
+```sh
+node tools/eval/compare.mjs \
+  --baseline evals/baselines/chat-smoke-minimax.json \
+  --candidate target/eval-report.json
+```
+
+A comparação exige os mesmos casos e repetições, não aceita queda de qualidade e reprova quando o custo por resposta sobe mais de 10% ou o p95 sobe mais de 25%. Se faltar o custo informado pelo provider, a comparação falha em vez de considerar a medição aprovada.
+
 Além dos checks de cada caso, todo caso reprova quando a resposta vem vazia ou quando o CLI informa um erro, para que um caso com checks só negativos não passe quando o modelo não responde.
 
 ## Sensores de observabilidade

@@ -18,7 +18,7 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 | R11 | Qualidade medida: e2e com provider real, evals com `pass@k`, sensores de observabilidade e linha de base | concluída (base); evolução em R14 |
 | R12 | Custo por resposta | concluída: redução medida de cerca de 70%, sem queda nos checks da eval |
 | R13 | Pendências do motor | concluída: tentativas interrompidas preservam o uso parcial, e a demo paralela roda sem token |
-| R14 | Evals completos | planejada |
+| R14 | Evals completos | em andamento: baseline versionado e bloqueio automático de regressão em qualidade, custo e latência |
 | R15 | Distribuição | em andamento; depende de repositório remoto e conta Apple |
 
 ## Critérios de saída

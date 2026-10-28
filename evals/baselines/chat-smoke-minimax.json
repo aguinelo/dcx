@@ -1,0 +1,71 @@
+{
+  "suite": "chat-smoke",
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "measured_at": "2026-10-28",
+  "cases": [
+    {
+      "id": "read-marker"
+    },
+    {
+      "id": "pong"
+    },
+    {
+      "id": "history"
+    },
+    {
+      "id": "history-direct"
+    },
+    {
+      "id": "read-only"
+    },
+    {
+      "id": "read-marker"
+    },
+    {
+      "id": "pong"
+    },
+    {
+      "id": "history"
+    },
+    {
+      "id": "history-direct"
+    },
+    {
+      "id": "read-only"
+    },
+    {
+      "id": "read-marker"
+    },
+    {
+      "id": "pong"
+    },
+    {
+      "id": "history"
+    },
+    {
+      "id": "history-direct"
+    },
+    {
+      "id": "read-only"
+    }
+  ],
+  "summary": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "pass_rate": 1,
+    "pass_at_k": 1,
+    "cost_usd": 0.3638664,
+    "cost_complete": true,
+    "latency_ms": {
+      "p50": 3444,
+      "p95": 12706
+    },
+    "tokens": {
+      "input": 76722,
+      "output": 2668,
+      "complete": true
+    }
+  }
+}
