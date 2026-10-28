@@ -12,21 +12,21 @@ export const repoRoot = path.resolve(
 	"..",
 );
 
-export async function harnessBinary() {
-	if (process.env.HARNESS_BIN) return process.env.HARNESS_BIN;
-	const local = path.join(repoRoot, "target", "debug", "harness");
+export async function dcxBinary() {
+	if (process.env.DCX_BIN) return process.env.DCX_BIN;
+	const local = path.join(repoRoot, "target", "debug", "dcx");
 	try {
 		await access(local);
 		return local;
 	} catch {
-		return "harness";
+		return "dcx";
 	}
 }
 
 export function realProviderEnv(provider) {
 	const normalized = (
 		provider ??
-		process.env.HARNESS_E2E_PROVIDER ??
+		process.env.DCX_E2E_PROVIDER ??
 		"minimax"
 	).toLowerCase();
 	if (normalized !== "claude" && normalized !== "minimax") {
@@ -34,16 +34,16 @@ export function realProviderEnv(provider) {
 	}
 	const env = {
 		...process.env,
-		HARNESS_CHAT_PROVIDER: normalized,
-		HARNESS_CHAT_WEB: "0",
+		DCX_CHAT_PROVIDER: normalized,
+		DCX_CHAT_WEB: "0",
 	};
 	if (
 		normalized === "minimax" &&
 		!env.MINIMAX_API_KEY &&
-		!env.HARNESS_MINIMAX_API_KEY
+		!env.DCX_MINIMAX_API_KEY
 	) {
 		throw new Error(
-			"defina MINIMAX_API_KEY (ou HARNESS_MINIMAX_API_KEY) para o provider minimax",
+			"defina MINIMAX_API_KEY (ou DCX_MINIMAX_API_KEY) para o provider minimax",
 		);
 	}
 	if (normalized === "claude" && !env.ANTHROPIC_API_KEY) {
@@ -104,7 +104,7 @@ export async function makeWorkspace(prefix) {
 }
 
 export async function latestSession(workspace) {
-	const sessionsRoot = path.join(workspace, ".harness", "sessions");
+	const sessionsRoot = path.join(workspace, ".dcx", "sessions");
 	const entries = await readdir(sessionsRoot, { withFileTypes: true });
 	const sessions = entries.filter((entry) => entry.isDirectory());
 	if (sessions.length !== 1) {
@@ -166,7 +166,7 @@ export async function snapshotProject(root) {
 	async function walk(directory, prefix) {
 		const entries = await readdir(directory, { withFileTypes: true });
 		for (const entry of entries) {
-			if (entry.name === ".harness") continue;
+			if (entry.name === ".dcx") continue;
 			const absolute = path.join(directory, entry.name);
 			const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
 			if (entry.isDirectory()) {

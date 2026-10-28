@@ -108,9 +108,9 @@ function runSensor(sensor, script, bundlePath, timeoutMs = 30_000) {
 			cwd: repoRoot,
 			env: {
 				...process.env,
-				HARNESS_BUNDLE: bundlePath,
-				HARNESS_SENSOR_ID: sensor.id,
-				HARNESS_VISIBILITY: sensor.visibility,
+				DCX_BUNDLE: bundlePath,
+				DCX_SENSOR_ID: sensor.id,
+				DCX_VISIBILITY: sensor.visibility,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
 		});

@@ -1,0 +1,26 @@
+[package]
+name = "dcx-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+default-run = "dcx"
+
+[dependencies]
+dotenvy = "0.15"
+dcx-artifacts = { path = "../dcx-artifacts" }
+dcx-engine = { path = "../dcx-engine" }
+dcx-sensors = { path = "../dcx-sensors" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "dcx"
+path = "src/main.rs"
+
+[[bin]]
+name = "dcxd"
+path = "src/bin/dcxd.rs"
+
+[lints]
+workspace = true

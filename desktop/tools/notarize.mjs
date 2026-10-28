@@ -26,8 +26,8 @@ function credentials() {
 
 export default async function notarize(context) {
   if (process.platform !== 'darwin') return;
-  if (process.env.HARNESS_SKIP_NOTARIZE === '1') {
-    console.log('Notarização ignorada por HARNESS_SKIP_NOTARIZE=1.');
+  if (process.env.DCX_SKIP_NOTARIZE === '1') {
+    console.log('Notarização ignorada por DCX_SKIP_NOTARIZE=1.');
     return;
   }
 
@@ -54,8 +54,8 @@ export default async function notarize(context) {
     return;
   }
 
-  const temporary = await mkdtemp(path.join(tmpdir(), 'harness-notarize-'));
-  const archive = path.join(temporary, 'Harness.zip');
+  const temporary = await mkdtemp(path.join(tmpdir(), 'dcx-notarize-'));
+  const archive = path.join(temporary, 'dcode.zip');
   try {
     console.log(`Compactando ${appPath} para notarização...`);
     run('ditto', ['-c', '-k', '--keepParent', appPath, archive]);

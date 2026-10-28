@@ -20,9 +20,9 @@ Cada rodada fecha com testes, demo reproduzível, documentação e commit. A rod
 - **R4:** o passo visível do `job-02` passa com o atalho e a integração é reprovada pelo sensor oculto; a disputa altera somente o sensor contestado; issues do verifier não vazam ids/checks ocultos.
 - **R5:** uma falha no meio do apply restaura os arquivos já copiados; cada run grava `events.jsonl`; `state prune` remove runs antigos e preserva os recentes.
 - **R6:** sensores não herdam o ambiente do usuário e podem rodar sob `sandbox-exec` no macOS ou `bwrap` no Linux, com rede e escrita fora do workspace bloqueadas.
-- **R7:** `HARNESS_PROVIDER=auto` tenta Claude e cai para Codex; CI roda fmt, testes, clippy, schemas e as demos; cada run registra chamadas, latência e custo conhecido em `metrics.json`.
+- **R7:** `DCX_PROVIDER=auto` tenta Claude e cai para Codex; CI roda fmt, testes, clippy, schemas e as demos; cada run registra chamadas, latência e custo conhecido em `metrics.json`.
 - **R8:** passos independentes executam em worktrees separadas; um run interrompido retoma do último passo concluído; dois runs concorrentes não colidem.
-- **R9:** `harness chat` mantém sessão persistente, streama a resposta, retoma histórico e não altera arquivos fora de `.harness/sessions`; `harness serve` expõe a mesma sessão por SSE local; o modo usa Claude/MiniMax em `plan` com apenas `Read`, `Glob` e `Grep`.
+- **R9:** `dcx chat` mantém sessão persistente, streama a resposta, retoma histórico e não altera arquivos fora de `.dcx/sessions`; `dcx serve` expõe a mesma sessão por SSE local; o modo usa Claude/MiniMax em `plan` com apenas `Read`, `Glob` e `Grep`.
 
 ## Próxima rodada
 

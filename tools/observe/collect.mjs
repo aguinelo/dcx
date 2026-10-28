@@ -22,7 +22,7 @@ function usage() {
 	return [
 		"Uso: node tools/observe/collect.mjs [opções]",
 		"",
-		"  --run <dir>              diretório do run (padrão: o mais recente em .harness/runs)",
+		"  --run <dir>              diretório do run (padrão: o mais recente em .dcx/runs)",
 		"  --out <arquivo>          bundle de saída (padrão: target/run-bundle.json)",
 		"  --expect approved|rejected  resultado esperado (padrão: approved)",
 		"  --provider <nome>        provider esperado",
@@ -109,7 +109,7 @@ async function readJson(file) {
 }
 
 async function latestRunDir(workspace) {
-	const runsRoot = path.join(workspace, ".harness", "runs");
+	const runsRoot = path.join(workspace, ".dcx", "runs");
 	const entries = await readdir(runsRoot, { withFileTypes: true });
 	const directories = entries.filter((entry) => entry.isDirectory());
 	if (directories.length === 0) {

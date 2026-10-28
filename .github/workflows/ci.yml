@@ -21,6 +21,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo run -q -p harness-cli -- schemas --check
-      - run: cargo run -q -p harness-cli -- run --demo
-      - run: cargo run -q -p harness-cli -- run --job-02
+      - run: cargo run -q -p dcx-cli -- schemas --check
+      - run: cargo run -q -p dcx-cli -- run --demo
+      - run: cargo run -q -p dcx-cli -- run --job-02

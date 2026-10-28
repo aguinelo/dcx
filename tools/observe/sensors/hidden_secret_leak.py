@@ -3,7 +3,7 @@ import os
 import re
 import sys
 
-SECRET_ENV = ("MINIMAX_API_KEY", "HARNESS_MINIMAX_API_KEY", "ANTHROPIC_API_KEY")
+SECRET_ENV = ("MINIMAX_API_KEY", "DCX_MINIMAX_API_KEY", "ANTHROPIC_API_KEY")
 PATTERNS = [
     ("anthropic", re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}")),
     ("openai", re.compile(r"sk-[A-Za-z0-9]{16,}")),
@@ -17,9 +17,9 @@ PATTERNS = [
 
 
 def load_bundle():
-    path = os.environ.get("HARNESS_BUNDLE")
+    path = os.environ.get("DCX_BUNDLE")
     if not path:
-        raise SystemExit("HARNESS_BUNDLE não definido")
+        raise SystemExit("DCX_BUNDLE não definido")
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 

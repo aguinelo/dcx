@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { HarnessClient } from '../src/harness/client.ts';
+import { DcxClient } from '../src/dcx/client.ts';
 
 function eventStream(records: string[]): Response {
   const encoder = new TextEncoder();
@@ -17,8 +17,8 @@ function eventStream(records: string[]): Response {
 test('run events reconnect from the last delivered event', async () => {
   const urls: string[] = [];
   let calls = 0;
-  const client = new HarnessClient({
-    baseUrl: 'http://harness.test',
+  const client = new DcxClient({
+    baseUrl: 'http://dcx.test',
     fetchImpl: async (input) => {
       urls.push(String(input));
       calls += 1;

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
 	changedPaths,
-	harnessBinary,
+	dcxBinary,
 	latestSession,
 	makeWorkspace,
 	realProviderEnv,
@@ -88,7 +88,7 @@ async function fileState(workspace, checks) {
 }
 
 async function executeCase(testCase, env, binary) {
-	const workspace = await makeWorkspace(`harness-eval-${testCase.id}-`);
+	const workspace = await makeWorkspace(`dcx-eval-${testCase.id}-`);
 	const started = Date.now();
 	let before = null;
 	let after = null;
@@ -114,7 +114,7 @@ async function executeCase(testCase, env, binary) {
 			return {
 				id: testCase.id,
 				ok: false,
-				error: `harness chat terminou com ${result.code}`,
+				error: `dcx chat terminou com ${result.code}`,
 				stdout: result.stdout.slice(-8000),
 				stderr: result.stderr.slice(-8000),
 				workspace_unchanged: filesChanged.length === 0,
@@ -219,7 +219,7 @@ async function main() {
 					provider:
 						args.provider ??
 						suite.provider ??
-						process.env.HARNESS_E2E_PROVIDER ??
+						process.env.DCX_E2E_PROVIDER ??
 						"minimax",
 					cases: suite.cases.map((testCase) => ({
 						id: testCase.id,
@@ -233,14 +233,14 @@ async function main() {
 		return;
 	}
 
-	if (process.env.HARNESS_EVAL !== "1") {
+	if (process.env.DCX_EVAL !== "1") {
 		throw new Error(
-			"defina HARNESS_EVAL=1 para executar evals com provider real",
+			"defina DCX_EVAL=1 para executar evals com provider real",
 		);
 	}
 
 	const { provider, env } = realProviderEnv(args.provider ?? suite.provider);
-	const binary = await harnessBinary();
+	const binary = await dcxBinary();
 	const startedAt = new Date().toISOString();
 	const started = Date.now();
 	const results = [];
@@ -287,7 +287,7 @@ async function main() {
 	const reportPath =
 		args.out ?? path.join(repoRoot, "target", "eval-report.json");
 	const bundlePath =
-		process.env.HARNESS_EVAL_BUNDLE ??
+		process.env.DCX_EVAL_BUNDLE ??
 		path.join(repoRoot, "target", "eval-bundle.json");
 	await mkdir(path.dirname(reportPath), { recursive: true });
 	await mkdir(path.dirname(bundlePath), { recursive: true });

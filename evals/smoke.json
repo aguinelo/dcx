@@ -6,13 +6,13 @@
 		{
 			"id": "read-marker",
 			"files": {
-				"README.md": "HARNESS_EVAL_MARKER_42\n"
+				"README.md": "DCX_EVAL_MARKER_42\n"
 			},
 			"prompt": "Leia README.md e responda apenas com o marcador que está nele.",
 			"checks": [
 				{
 					"type": "contains",
-					"value": "HARNESS_EVAL_MARKER_42"
+					"value": "DCX_EVAL_MARKER_42"
 				}
 			]
 		},

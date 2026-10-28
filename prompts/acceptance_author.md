@@ -96,10 +96,10 @@ Rules for `scripts`:
 - exactly one entry per sensor in the contract, no extras;
 - `filename` is a local `.py` name with no slash and no `..`;
 - `source` is complete, runnable Python;
-- the script reads the task workspace from `HARNESS_WORKSPACE`, and may read
-  `HARNESS_SENSOR_ID` and `HARNESS_CRITERION_ID`;
+- the script reads the task workspace from `DCX_WORKSPACE`, and may read
+  `DCX_SENSOR_ID` and `DCX_CRITERION_ID`;
 - exit code 0 means pass; any other exit code means fail;
 - print a short human-readable evidence line on stdout or stderr; the engine
   keeps the first 2000 characters;
-- do not use network, do not write outside `HARNESS_WORKSPACE`, and do not
+- do not use network, do not write outside `DCX_WORKSPACE`, and do not
   modify the workspace.

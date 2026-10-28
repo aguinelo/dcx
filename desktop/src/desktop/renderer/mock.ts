@@ -1,6 +1,6 @@
 /**
  * Shared type for live background runs. The renderer receives their data
- * from Harness events; no mock terminal output is kept here.
+ * from dcode events; no mock terminal output is kept here.
  */
 
 /**

@@ -37,6 +37,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "dcx-artifacts"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "dcx-cli"
+version = "0.1.0"
+dependencies = [
+ "dcx-artifacts",
+ "dcx-engine",
+ "dcx-sensors",
+ "dotenvy",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "dcx-engine"
+version = "0.1.0"
+dependencies = [
+ "dcx-artifacts",
+ "serde_json",
+]
+
+[[package]]
+name = "dcx-sensors"
+version = "0.1.0"
+dependencies = [
+ "dcx-artifacts",
+ "dcx-engine",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -66,44 +104,6 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
-]
-
-[[package]]
-name = "harness-artifacts"
-version = "0.1.0"
-dependencies = [
- "schemars",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "harness-cli"
-version = "0.1.0"
-dependencies = [
- "dotenvy",
- "harness-artifacts",
- "harness-engine",
- "harness-sensors",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "harness-engine"
-version = "0.1.0"
-dependencies = [
- "harness-artifacts",
- "serde_json",
-]
-
-[[package]]
-name = "harness-sensors"
-version = "0.1.0"
-dependencies = [
- "harness-artifacts",
- "harness-engine",
 ]
 
 [[package]]

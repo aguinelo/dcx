@@ -14,9 +14,9 @@ PATTERNS = [
 
 
 def load_bundle():
-    path = os.environ.get("HARNESS_BUNDLE")
+    path = os.environ.get("DCX_BUNDLE")
     if not path:
-        raise SystemExit("HARNESS_BUNDLE não definido")
+        raise SystemExit("DCX_BUNDLE não definido")
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 

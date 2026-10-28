@@ -31,20 +31,20 @@ jobs:
         with:
           node-version: 20
       - run: npm install -g @anthropic-ai/claude-code
-      - run: cargo build -p harness-cli
+      - run: cargo build -p dcx-cli
       - name: E2E real
         env:
-          HARNESS_E2E: '1'
-          HARNESS_E2E_PROVIDER: ${{ inputs.provider }}
-          HARNESS_BIN: target/debug/harness
+          DCX_E2E: '1'
+          DCX_E2E_PROVIDER: ${{ inputs.provider }}
+          DCX_BIN: target/debug/dcx
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: node tools/e2e/real.mjs
       - name: Evals
         env:
-          HARNESS_EVAL: '1'
-          HARNESS_E2E_PROVIDER: ${{ inputs.provider }}
-          HARNESS_BIN: target/debug/harness
+          DCX_EVAL: '1'
+          DCX_E2E_PROVIDER: ${{ inputs.provider }}
+          DCX_BIN: target/debug/dcx
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: node tools/eval/run.mjs --suite "${{ inputs.suite }}" --provider "${{ inputs.provider }}"

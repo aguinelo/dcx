@@ -112,7 +112,7 @@ idempotency, encodings, authorization across users.
   the criteria with the most tempting shortcuts, and at least one per
   contract.
 - Describe hidden checks as precisely as visible ones. Keeping them away from
-  the `planner` and the `executor` is the harness's job, not vagueness's.
+  the `planner` and the `executor` is the dcode's job, not vagueness's.
 
 ## Principle 9 — Constraints and out of scope
 
@@ -168,7 +168,7 @@ The `engine` validates the schema and the rules the schema cannot express
 (every criterion has at least one sensor); on errors you get them back and
 redo the artifact. A valid contract always opens `contract_approval`.
 
-## Harness MVP output envelope
+## dcode MVP output envelope
 
 Return a JSON object matching `contract_bundle.schema.json`. Put the contract
 fields under `contract` and the acceptance sensors under `sensor_suite`.

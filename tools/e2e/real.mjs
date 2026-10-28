@@ -6,7 +6,7 @@ import path from "node:path";
 import {
 	changedPaths,
 	freePort,
-	harnessBinary,
+	dcxBinary,
 	latestSession,
 	makeWorkspace,
 	realProviderEnv,
@@ -22,7 +22,7 @@ function assert(condition, message) {
 }
 
 async function chatCheck(provider, env, binary) {
-	const workspace = await makeWorkspace("harness-e2e-chat-");
+	const workspace = await makeWorkspace("dcx-e2e-chat-");
 	try {
 		await writeFile(path.join(workspace, "README.md"), "original\n");
 		const before = await snapshotProject(workspace);
@@ -80,7 +80,7 @@ async function chatCheck(provider, env, binary) {
 }
 
 async function daemonCheck(provider, env, binary) {
-	const workspace = await makeWorkspace("harness-e2e-daemon-");
+	const workspace = await makeWorkspace("dcx-e2e-daemon-");
 	const before = await snapshotProject(workspace);
 	const port = await freePort();
 	const server = spawn(binary, ["serve", "--bind", `127.0.0.1:${port}`], {
@@ -169,15 +169,15 @@ async function daemonCheck(provider, env, binary) {
 }
 
 async function main() {
-	if (process.env.HARNESS_E2E !== "1") {
+	if (process.env.DCX_E2E !== "1") {
 		console.log(
-			"SKIP: defina HARNESS_E2E=1 para executar o e2e com provider real.",
+			"SKIP: defina DCX_E2E=1 para executar o e2e com provider real.",
 		);
 		return;
 	}
 
 	const { provider, env } = realProviderEnv();
-	const binary = await harnessBinary();
+	const binary = await dcxBinary();
 	const startedAt = new Date().toISOString();
 	const started = Date.now();
 	const checks = [];
@@ -219,10 +219,10 @@ async function main() {
 		},
 	};
 	const reportPath =
-		process.env.HARNESS_E2E_REPORT ??
+		process.env.DCX_E2E_REPORT ??
 		path.join(repoRoot, "target", "e2e-real-report.json");
 	const bundlePath =
-		process.env.HARNESS_E2E_BUNDLE ??
+		process.env.DCX_E2E_BUNDLE ??
 		path.join(repoRoot, "target", "e2e-bundle.json");
 	await mkdir(path.dirname(reportPath), { recursive: true });
 	await mkdir(path.dirname(bundlePath), { recursive: true });

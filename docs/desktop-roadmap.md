@@ -1,7 +1,7 @@
 # Roadmap do desktop
 
-Roadmap da interface Electron em `desktop/`, separado do roadmap do motor Harness.
-O objetivo é aproximar a interface do Claude Desktop mantendo o Harness como backend
+Roadmap da interface Electron em `desktop/`, separado do roadmap do motor dcode.
+O objetivo é aproximar a interface do Claude Desktop mantendo o dcode como backend
 de conversa e execução.
 
 ## Fases
@@ -9,10 +9,10 @@ de conversa e execução.
 | Fase | Estado | Entrega |
 |---|---|---|
 | 1. Sessões confiáveis | Concluída | Criar uma conversa nova não reutiliza a sessão anterior; removido o fluxo de simulação que confundia o estado real. |
-| 2. Dados reais de trabalho | Concluída | Alterações mostra PRs reais via `gh`; tarefas em segundo plano acompanham runs do Harness e podem ser canceladas. |
+| 2. Dados reais de trabalho | Concluída | Alterações mostra PRs reais via `gh`; tarefas em segundo plano acompanham runs do dcode e podem ser canceladas. |
 | 3. Troca de workspace | Concluída | Itens locais em Workspaces são selecionáveis; o seletor nativo adiciona qualquer pasta; histórico, configurações e conversas usam o projeto escolhido; workspaces recentes persistem entre aberturas. |
 | 4. Ferramentas da interface | Concluída | Terminal real com confirmação por comando, catálogo/visualizador de artefatos JSON, busca local, rotinas com agendamento recorrente de 1 h a 7 dias e retomada de runs após reinício do daemon. |
-| 5. Distribuição | Em andamento | Empacotamento macOS reproduzível em DMG, CLI Harness incluído, ícone próprio e daemon local iniciado automaticamente. Assinatura/notarização condicionais estão implementadas; credenciais Apple e canal de atualização automática ainda são pendências externas. |
+| 5. Distribuição | Em andamento | Empacotamento macOS reproduzível em DMG, CLI dcode incluído, ícone próprio e daemon local iniciado automaticamente. Assinatura/notarização condicionais estão implementadas; credenciais Apple e canal de atualização automática ainda são pendências externas. |
 
 ## Critérios de conclusão
 
@@ -25,7 +25,7 @@ de conversa e execução.
 - Rotinas são persistidas por workspace; usar uma rotina prepara uma conversa nova e não envia nada antes de revisão e envio pelo usuário.
 - Agendamentos ficam desativados por padrão, exigem confirmação, executam em modo somente leitura e registram status e custo conhecido.
 - Runs em andamento são retomados após o reinício do daemon; se o contrato ainda não foi aprovado, o fluxo recomeça e pede aprovação novamente.
-- O DMG de desenvolvimento inclui o CLI do Harness; o app inicia o daemon local quando o endpoint padrão está indisponível e não assume controle de endpoints customizados.
+- O DMG de desenvolvimento inclui o CLI do dcode; o app inicia o daemon local quando o endpoint padrão está indisponível e não assume controle de endpoints customizados.
 - O app usa ícone próprio; sem credenciais Apple o build continua reproduzível com assinatura ad-hoc, e com identidade Developer ID + credenciais o hook notariza e aplica o ticket.
 - A interface não apresenta dados simulados como se fossem dados reais.
 - `cd desktop && npm run typecheck && npm run build` passa antes de cada entrega.
@@ -35,9 +35,9 @@ de conversa e execução.
 Inicie o daemon na raiz do repositório e abra o desktop apontando para um workspace:
 
 ```sh
-cargo run -p harness-cli -- serve --bind 127.0.0.1:8787
+cargo run -p dcx-cli --bin dcxd -- --bind 127.0.0.1:8787
 cd desktop
-HARNESS_WORKSPACE="$PWD/.." npm run desktop
+DCX_WORKSPACE="$PWD/.." npm run desktop
 ```
 
 Na interface, crie uma conversa, envie uma mensagem e clique em **Criar**. Envie outra

@@ -12,7 +12,7 @@
       "node_modules/**",
       "*.md",
       "tools/**",
-      ".harness/**",
+      ".dcx/**",
       "core/**",
       "src/desktop/protocol/generated.ts"
     ]

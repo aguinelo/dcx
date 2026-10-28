@@ -1,5 +1,5 @@
 /target/
-/.harness/
+/.dcx/
 __pycache__/
 .pytest_cache/
 .venv/

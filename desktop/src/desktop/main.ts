@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { BrowserWindow, Menu, app, dialog, ipcMain, shell } from 'electron';
 import { runAgent } from '../agent/loop.ts';
 import { PermissionGate } from '../agent/permissions.ts';
-import { HarnessClient } from '../harness/client.ts';
+import { DcxClient } from '../dcx/client.ts';
 import { createAnthropicProvider } from '../provider/anthropic.ts';
 import type { Provider } from '../provider/types.ts';
 import { DEMO_SCRIPT, createScriptedProvider } from '../testing/scripted.ts';
 import { ToolRegistry, defaultTools } from '../tools/registry.ts';
 import { PersistentShell } from '../tools/shell.ts';
 import type { ToolContext } from '../tools/types.ts';
-import { resolveHarnessCommand, shouldManageHarness } from './daemon.ts';
+import { resolveDcxCommand, shouldManageDcx } from './daemon.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rendererRoot = path.join(here, 'renderer');
@@ -25,30 +25,30 @@ let context: ToolContext | undefined;
 let registry: ToolRegistry | undefined;
 let abortController: AbortController | undefined;
 const terminalShells = new Map<string, PersistentShell>();
-let managedHarness: ChildProcess | undefined;
+let managedDcx: ChildProcess | undefined;
 
-function getHarnessWorkspace(): string {
-  return process.env.HARNESS_WORKSPACE ?? app.getPath('home');
+function getDcxWorkspace(): string {
+  return process.env.DCX_WORKSPACE ?? app.getPath('home');
 }
 
-function getHarnessClient(): HarnessClient {
-  return new HarnessClient({ baseUrl: process.env.HARNESS_URL ?? 'http://127.0.0.1:8787' });
+function getDcxClient(): DcxClient {
+  return new DcxClient({ baseUrl: process.env.DCX_URL ?? 'http://127.0.0.1:8787' });
 }
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function startHarnessIfNeeded(): Promise<void> {
-  if (process.env.REPL_SCRIPTED === '1' || !shouldManageHarness()) return;
+async function startDcxIfNeeded(): Promise<void> {
+  if (process.env.REPL_SCRIPTED === '1' || !shouldManageDcx()) return;
   try {
-    await getHarnessClient().health();
+    await getDcxClient().health();
     return;
   } catch {
     // Start the bundled/local daemon below when the default endpoint is down.
   }
 
-  const command = resolveHarnessCommand({
+  const command = resolveDcxCommand({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     desktopRoot: path.resolve(here, '../..'),
@@ -57,43 +57,43 @@ async function startHarnessIfNeeded(): Promise<void> {
     await access(command.command);
   } catch {
     throw new Error(
-      `Não encontrei o executável do Harness em ${command.command}. Compile com cargo ou configure HARNESS_BIN.`,
+      `Não encontrei o daemon dcxd em ${command.command}. Compile com cargo ou configure DCX_DAEMON_BIN.`,
     );
   }
 
-  managedHarness = spawn(command.command, command.args, {
-    cwd: getHarnessWorkspace(),
+  managedDcx = spawn(command.command, command.args, {
+    cwd: getDcxWorkspace(),
     env: process.env,
     stdio: 'ignore',
     windowsHide: true,
   });
-  managedHarness.on('error', (error) => {
-    console.error(`Falha ao iniciar o daemon Harness: ${error.message}`);
+  managedDcx.on('error', (error) => {
+    console.error(`Falha ao iniciar o daemon dcode: ${error.message}`);
   });
 
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    if (managedHarness.exitCode !== null) {
+    if (managedDcx.exitCode !== null) {
       throw new Error(
-        `O daemon Harness encerrou durante a inicialização (código ${managedHarness.exitCode}).`,
+        `O daemon dcode encerrou durante a inicialização (código ${managedDcx.exitCode}).`,
       );
     }
     try {
-      await getHarnessClient().health();
+      await getDcxClient().health();
       return;
     } catch {
       await delay(250);
     }
   }
-  managedHarness.kill('SIGTERM');
-  managedHarness = undefined;
-  throw new Error('O daemon Harness não respondeu em até 10 segundos.');
+  managedDcx.kill('SIGTERM');
+  managedDcx = undefined;
+  throw new Error('O daemon dcode não respondeu em até 10 segundos.');
 }
 
 /** Shells out to the same `claude` CLI the chat provider uses, so the account
  * menu reflects the real, shared Claude Code login rather than a local guess. */
 function runClaudeAuth(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(process.env.HARNESS_CLAUDE_BIN ?? 'claude', ['auth', ...args], { timeout: 15_000 }, (error, stdout, stderr) => {
+    execFile(process.env.DCX_CLAUDE_BIN ?? 'claude', ['auth', ...args], { timeout: 15_000 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(stderr.trim() || error.message));
         return;
@@ -206,13 +206,13 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   buildMenu();
   try {
-    await startHarnessIfNeeded();
+    await startDcxIfNeeded();
   } catch (error) {
     console.error(error);
     await dialog.showMessageBox({
       type: 'warning',
-      title: 'Harness indisponível',
-      message: 'Não foi possível iniciar o daemon local do Harness.',
+      title: 'dcode indisponível',
+      message: 'Não foi possível iniciar o daemon local do dcode.',
       detail: error instanceof Error ? error.message : String(error),
       buttons: ['Continuar'],
     });
@@ -231,8 +231,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  managedHarness?.kill('SIGTERM');
-  managedHarness = undefined;
+  managedDcx?.kill('SIGTERM');
+  managedDcx = undefined;
 });
 
 /**
@@ -250,9 +250,9 @@ ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | u
 
   try {
     if (process.env.REPL_DESKTOP_LOCAL !== '1') {
-      const client = getHarnessClient();
+      const client = getDcxClient();
       await client.chat(
-        workspace || getHarnessWorkspace(),
+        workspace || getDcxWorkspace(),
         prompt,
         activeSessionId,
         contextWorkspaces,
@@ -272,7 +272,7 @@ ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | u
           } else if (event.event === 'done') {
             send({ type: 'done' });
           } else if (event.event === 'error') {
-            send({ type: 'error', message: String(event.data.message ?? 'erro do Harness') });
+            send({ type: 'error', message: String(event.data.message ?? 'erro do dcode') });
           }
         },
         abortController.signal,
@@ -302,7 +302,7 @@ ipcMain.handle('agent:run', async (_event, prompt: string, workspace: string | u
   }
 });
 
-ipcMain.handle('harness:addContextRepo', async (_event, workspace: string) => {
+ipcMain.handle('dcx:addContextRepo', async (_event, workspace: string) => {
   const ownerWindow = mainWindow;
   if (!ownerWindow) return undefined;
   const picker = await dialog.showOpenDialog(ownerWindow, {
@@ -326,14 +326,14 @@ ipcMain.handle('harness:addContextRepo', async (_event, workspace: string) => {
 
   let provider = 'modelo configurado';
   try {
-    provider = (await getHarnessClient().config(workspace)).provider;
+    provider = (await getDcxClient().config(workspace)).provider;
   } catch {
     // Permission copy stays accurate even while the daemon is unavailable.
   }
   const answer = await dialog.showMessageBox(ownerWindow, {
     type: 'warning',
     title: 'Autorizar acesso ao repositório?',
-    message: `Permitir que o Harness leia ${path.basename(canonical)}?`,
+    message: `Permitir que o dcode leia ${path.basename(canonical)}?`,
     detail: `Arquivos desse repositório poderão ser incluídos no contexto e enviados ao provider ${provider} durante as conversas deste workspace. Você pode remover o acesso pela barra lateral a qualquer momento.`,
     buttons: ['Cancelar', 'Permitir acesso'],
     defaultId: 0,
@@ -398,8 +398,8 @@ ipcMain.handle('session:context', (_event, usedTokens: number) => {
   };
 });
 
-ipcMain.handle('harness:workspace', () => getHarnessWorkspace());
-ipcMain.handle('harness:pickWorkspace', async () => {
+ipcMain.handle('dcx:workspace', () => getDcxWorkspace());
+ipcMain.handle('dcx:pickWorkspace', async () => {
   const ownerWindow = mainWindow;
   if (!ownerWindow) return undefined;
   const picker = await dialog.showOpenDialog(ownerWindow, {
@@ -410,32 +410,32 @@ ipcMain.handle('harness:pickWorkspace', async () => {
   if (picker.canceled || !picker.filePaths[0]) return undefined;
   return realpath(picker.filePaths[0]);
 });
-ipcMain.handle('harness:sessions', (_event, workspace: string) =>
-  getHarnessClient().sessions(workspace),
+ipcMain.handle('dcx:sessions', (_event, workspace: string) =>
+  getDcxClient().sessions(workspace),
 );
-ipcMain.handle('harness:setPinned', (_event, workspace: string, sessionId: string, pinned: boolean) =>
-  getHarnessClient().setPinned(workspace, sessionId, pinned),
+ipcMain.handle('dcx:setPinned', (_event, workspace: string, sessionId: string, pinned: boolean) =>
+  getDcxClient().setPinned(workspace, sessionId, pinned),
 );
-ipcMain.handle('harness:session', (_event, workspace: string, sessionId: string) =>
-  getHarnessClient().session(workspace, sessionId),
+ipcMain.handle('dcx:session', (_event, workspace: string, sessionId: string) =>
+  getDcxClient().session(workspace, sessionId),
 );
-ipcMain.handle('harness:projects', (_event, root: string) => getHarnessClient().projects(root));
-ipcMain.handle('harness:config', (_event, workspace: string) => getHarnessClient().config(workspace));
+ipcMain.handle('dcx:projects', (_event, root: string) => getDcxClient().projects(root));
+ipcMain.handle('dcx:config', (_event, workspace: string) => getDcxClient().config(workspace));
 ipcMain.handle(
-  'harness:setConfig',
-  (_event, workspace: string, updates: Parameters<HarnessClient['setConfig']>[1]) =>
-    getHarnessClient().setConfig(workspace, updates),
+  'dcx:setConfig',
+  (_event, workspace: string, updates: Parameters<DcxClient['setConfig']>[1]) =>
+    getDcxClient().setConfig(workspace, updates),
 );
-ipcMain.handle('harness:account', (_event, workspace: string) => getHarnessClient().account(workspace));
-ipcMain.handle('harness:gitBranch', (_event, workspace: string) => getHarnessClient().gitBranch(workspace));
-ipcMain.handle('harness:githubRepos', () => getHarnessClient().githubRepos());
-ipcMain.handle('harness:githubPrs', () => getHarnessClient().githubPrs());
-ipcMain.handle('harness:runCatalog', (_event, workspace: string) => getHarnessClient().runCatalog(workspace));
-ipcMain.handle('harness:artifact', (_event, workspace: string, runId: string, name: string) => getHarnessClient().artifact(workspace, runId, name));
-ipcMain.handle('harness:searchSessions', (_event, workspace: string, query: string) => getHarnessClient().searchSessions(workspace, query));
-ipcMain.handle('harness:routines', (_event, workspace: string) => getHarnessClient().routines(workspace));
-ipcMain.handle('harness:saveRoutine', (_event, workspace: string, routine: { id?: string; title: string; prompt: string; interval_hours: number | null }) => getHarnessClient().saveRoutine(workspace, routine));
-ipcMain.handle('harness:deleteRoutine', (_event, workspace: string, id: string) => getHarnessClient().deleteRoutine(workspace, id));
+ipcMain.handle('dcx:account', (_event, workspace: string) => getDcxClient().account(workspace));
+ipcMain.handle('dcx:gitBranch', (_event, workspace: string) => getDcxClient().gitBranch(workspace));
+ipcMain.handle('dcx:githubRepos', () => getDcxClient().githubRepos());
+ipcMain.handle('dcx:githubPrs', () => getDcxClient().githubPrs());
+ipcMain.handle('dcx:runCatalog', (_event, workspace: string) => getDcxClient().runCatalog(workspace));
+ipcMain.handle('dcx:artifact', (_event, workspace: string, runId: string, name: string) => getDcxClient().artifact(workspace, runId, name));
+ipcMain.handle('dcx:searchSessions', (_event, workspace: string, query: string) => getDcxClient().searchSessions(workspace, query));
+ipcMain.handle('dcx:routines', (_event, workspace: string) => getDcxClient().routines(workspace));
+ipcMain.handle('dcx:saveRoutine', (_event, workspace: string, routine: { id?: string; title: string; prompt: string; interval_hours: number | null }) => getDcxClient().saveRoutine(workspace, routine));
+ipcMain.handle('dcx:deleteRoutine', (_event, workspace: string, id: string) => getDcxClient().deleteRoutine(workspace, id));
 
 ipcMain.handle('auth:status', async () => {
   try {
@@ -454,14 +454,14 @@ ipcMain.handle('auth:logout', async () => {
   await runClaudeAuth(['logout']);
   return { loggedIn: false };
 });
-ipcMain.handle('harness:promote', (_event, workspace: string, sessionId: string) =>
-  getHarnessClient().promote(workspace, sessionId),
+ipcMain.handle('dcx:promote', (_event, workspace: string, sessionId: string) =>
+  getDcxClient().promote(workspace, sessionId),
 );
-ipcMain.handle('harness:approve', (_event, workspace: string, sessionId: string) =>
-  getHarnessClient().approve(workspace, sessionId, true),
+ipcMain.handle('dcx:approve', (_event, workspace: string, sessionId: string) =>
+  getDcxClient().approve(workspace, sessionId, true),
 );
-ipcMain.handle('harness:start', async (_event, workspace: string, sessionId: string) => {
-  const client = getHarnessClient();
+ipcMain.handle('dcx:start', async (_event, workspace: string, sessionId: string) => {
+  const client = getDcxClient();
   const started = await client.start(workspace, sessionId);
   void client.events(workspace, started.run_id, (event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -474,4 +474,4 @@ ipcMain.handle('harness:start', async (_event, workspace: string, sessionId: str
   });
   return started;
 });
-ipcMain.handle('harness:cancelRun', (_event, workspace: string, runId: string) => getHarnessClient().cancel(workspace, runId));
+ipcMain.handle('dcx:cancelRun', (_event, workspace: string, runId: string) => getDcxClient().cancel(workspace, runId));

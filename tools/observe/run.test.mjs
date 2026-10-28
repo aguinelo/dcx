@@ -15,7 +15,7 @@ function run(args) {
 	return spawnSync(process.execPath, [runner, ...args], {
 		cwd: repoRoot,
 		encoding: "utf8",
-		env: { ...process.env, HARNESS_BUNDLE: "" },
+		env: { ...process.env, DCX_BUNDLE: "" },
 	});
 }
 

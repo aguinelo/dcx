@@ -1,6 +1,6 @@
 # Registro de decisões
 
-Decisões que afetam schemas, interfaces ou escopo devem ser registradas aqui antes de orientar implementação. Identificadores e caminhos seguem a especificação do harness; texto explicativo em pt-BR.
+Decisões que afetam schemas, interfaces ou escopo devem ser registradas aqui antes de orientar implementação. Identificadores e caminhos seguem a especificação do dcode; texto explicativo em pt-BR.
 
 Decisões abertas para M0:
 

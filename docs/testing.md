@@ -12,23 +12,23 @@ Os níveis 2 e 3 não rodam no CI normal e exigem token real. O nível 4 roda no
 ## Preparar o binário
 
 ```sh
-cargo build -p harness-cli
+cargo build -p dcx-cli
 ```
 
-O runner usa `target/debug/harness` por padrão. Defina `HARNESS_BIN` para usar outro binário.
+O runner usa `target/debug/dcx` por padrão. Defina `DCX_BIN` para usar outro binário.
 
 ## E2E real
 
 O e2e real cobre:
 
-- `harness chat` com provider real, streaming, persistência de sessão e ausência de escrita no projeto;
-- daemon `harness serve`, `/health`, `POST /chat` via SSE, evento `done` e sessão visível em `/sessions`.
+- `dcx chat` com provider real, streaming, persistência de sessão e ausência de escrita no projeto;
+- daemon `dcxd`, `/health`, `POST /chat` via SSE, evento `done` e sessão visível em `/sessions`.
 
 Ele ainda não cobre a interface Electron empacotada, o fluxo completo de contrato/execução, terminal, rotinas ou GitHub.
 
 ```sh
-HARNESS_E2E=1 \
-HARNESS_E2E_PROVIDER=minimax \
+DCX_E2E=1 \
+DCX_E2E_PROVIDER=minimax \
 MINIMAX_API_KEY=... \
 node tools/e2e/real.mjs
 ```
@@ -36,13 +36,13 @@ node tools/e2e/real.mjs
 Para Claude:
 
 ```sh
-HARNESS_E2E=1 \
-HARNESS_E2E_PROVIDER=claude \
+DCX_E2E=1 \
+DCX_E2E_PROVIDER=claude \
 ANTHROPIC_API_KEY=... \
 node tools/e2e/real.mjs
 ```
 
-O relatório vai para `target/e2e-real-report.json` e o bundle para `target/e2e-bundle.json`; use `HARNESS_E2E_REPORT` e `HARNESS_E2E_BUNDLE` para outros caminhos. Sem `HARNESS_E2E=1`, o comando apenas imprime `SKIP`.
+O relatório vai para `target/e2e-real-report.json` e o bundle para `target/e2e-bundle.json`; use `DCX_E2E_REPORT` e `DCX_E2E_BUNDLE` para outros caminhos. Sem `DCX_E2E=1`, o comando apenas imprime `SKIP`.
 
 ## Evals
 
@@ -56,8 +56,8 @@ A suite fica em `evals/smoke.json` e usa checks determinísticos:
 Cada caso roda em um workspace isolado e pode ter `prompt` ou `turns`, além de `files` para preparar fixtures. O runner registra sessão, modelo, custo, duração e tokens quando o provider reporta. Use `--provider claude` para sobrescrever o provider da suite.
 
 ```sh
-HARNESS_EVAL=1 \
-HARNESS_E2E_PROVIDER=minimax \
+DCX_EVAL=1 \
+DCX_E2E_PROVIDER=minimax \
 MINIMAX_API_KEY=... \
 node tools/eval/run.mjs --suite evals/smoke.json
 ```
@@ -65,8 +65,8 @@ node tools/eval/run.mjs --suite evals/smoke.json
 Para repetir cada caso e calcular `pass@k`:
 
 ```sh
-HARNESS_EVAL=1 \
-HARNESS_E2E_PROVIDER=minimax \
+DCX_EVAL=1 \
+DCX_E2E_PROVIDER=minimax \
 MINIMAX_API_KEY=... \
 node tools/eval/run.mjs --suite evals/smoke.json --repeat 3
 ```
@@ -77,7 +77,7 @@ Valide a suite sem gastar token:
 node tools/eval/run.mjs --suite evals/smoke.json --dry-run
 ```
 
-O relatório vai para `target/eval-report.json` e o bundle para `target/eval-bundle.json`; use `--out` e `HARNESS_EVAL_BUNDLE` para outros caminhos e `--json` para imprimir o JSON completo. O comando falha se algum caso falhar.
+O relatório vai para `target/eval-report.json` e o bundle para `target/eval-bundle.json`; use `--out` e `DCX_EVAL_BUNDLE` para outros caminhos e `--json` para imprimir o JSON completo. O comando falha se algum caso falhar.
 
 Os testes do scorer rodam sem token:
 
@@ -117,27 +117,27 @@ Os testes dos sensores rodam sem token:
 node --test tools/observe/run.test.mjs tools/observe/collect.test.mjs
 ```
 
-## Runs do harness
+## Runs do dcode
 
-O coletor transforma um run real em um bundle de observabilidade. Ele lê `.harness/runs/<id>/` e confere artefatos, eventos, veredito, sensores, estado final, workspace e provider.
+O coletor transforma um run real em um bundle de observabilidade. Ele lê `.dcx/runs/<id>/` e confere artefatos, eventos, veredito, sensores, estado final, workspace e provider.
 
 ```sh
-node tools/observe/collect.mjs --run .harness/runs/<id> --out target/run-bundle.json
+node tools/observe/collect.mjs --run .dcx/runs/<id> --out target/run-bundle.json
 node tools/observe/run.mjs --bundle target/run-bundle.json
 ```
 
-Capture stdout e stderr do `harness run` para que os sensores também os leiam:
+Capture stdout e stderr do `dcx run` para que os sensores também os leiam:
 
 ```sh
-target/debug/harness run --request "..." > target/run.stdout 2> target/run.stderr
+target/debug/dcx run --request "..." > target/run.stdout 2> target/run.stderr
 node tools/observe/collect.mjs \
-  --run .harness/runs/<id> \
+  --run .dcx/runs/<id> \
   --stdout target/run.stdout \
   --stderr target/run.stderr \
   --out target/run-bundle.json
 ```
 
-Sem `--run`, o coletor usa o run mais recente em `.harness/runs`. Use `--expect rejected` para um run que deve falhar, `--allow-fallback` para declarar múltiplos providers e `--strict` para sair com erro quando o bundle não estiver ok. Os tetos opcionais são `--max-cost-usd`, `--max-duration-ms` e `--max-model-calls`.
+Sem `--run`, o coletor usa o run mais recente em `.dcx/runs`. Use `--expect rejected` para um run que deve falhar, `--allow-fallback` para declarar múltiplos providers e `--strict` para sair com erro quando o bundle não estiver ok. Os tetos opcionais são `--max-cost-usd`, `--max-duration-ms` e `--max-model-calls`.
 
 ### Medição local de 2026-10-27
 
@@ -146,13 +146,13 @@ Sem `--run`, o coletor usa o run mais recente em `.harness/runs`. Use `--expect 
 | MiniMax | 9,3 s | US$ 0,1421 | 4/4 | US$ 0,3476 | 18,7 s | 6/6 |
 | Claude | 13,6 s | US$ 0,2667 | 4/4 | US$ 0,4408 | 5,4 s | 6/6 |
 
-Os valores variam por execução. O controle negativo reprovou os seis sensores no fixture defeituoso nas duas rodadas. O coletor também foi validado em um `harness run --request` completo com Codex falso: 7/7 checks do bundle, 6/6 sensores e estado final `awaiting_merge`.
+Os valores variam por execução. O controle negativo reprovou os seis sensores no fixture defeituoso nas duas rodadas. O coletor também foi validado em um `dcx run --request` completo com Codex falso: 7/7 checks do bundle, 6/6 sensores e estado final `awaiting_merge`.
 
 ## O que ainda falta
 
 - E2E da interface Electron e do DMG empacotado.
 - E2E do fluxo completo `run --request` com contrato, sensores, plano, execução e merge gate.
-- Automatizar a coleta de `.harness/runs/<id>` no e2e e no CI; hoje o coletor é manual.
+- Automatizar a coleta de `.dcx/runs/<id>` no e2e e no CI; hoje o coletor é manual.
 - Eval com juiz de modelo, rubricas abertas e comparação entre providers/modelos.
 - Threshold de regressão por suite e histórico versionado de resultados.
 - Cobertura de terminal, rotinas, GitHub e recuperação de runs no e2e real.

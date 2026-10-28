@@ -10,4 +10,4 @@ que só cobre os exemplos visíveis.
 - O plano tem dois passos: implementação (sensores visíveis) e integração
   (todos os sensores). O primeiro passo passa; a integração é reprovada.
 
-Execute com `cargo run -q -p harness-cli -- run --job-02`.
+Execute com `cargo run -q -p dcx-cli -- run --job-02`.

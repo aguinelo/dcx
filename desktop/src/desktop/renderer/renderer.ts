@@ -113,8 +113,8 @@ let searchSequence = 0;
 let currentRoutineId: string | undefined;
 let currentRoutineIntervalHours: number | null = null;
 
-const CONTEXT_REPOS_KEY = 'harness.contextRepos';
-const WORKSPACES_KEY = 'harness.workspaces';
+const CONTEXT_REPOS_KEY = 'dcx.contextRepos';
+const WORKSPACES_KEY = 'dcx.workspaces';
 
 function savedWorkspaces(): string[] {
   try {
@@ -379,7 +379,7 @@ async function saveCurrentRoutine(event: SubmitEvent): Promise<void> {
   if (!title || !prompt) return;
   if (intervalHours !== null && intervalHours !== currentRoutineIntervalHours) {
     const accepted = window.confirm(
-      `Agendar “${title}” a cada ${intervalHours} hora(s)? O Harness enviará as instruções ao modelo automaticamente, o que pode gerar custos. O daemon local precisa estar aberto.`,
+      `Agendar “${title}” a cada ${intervalHours} hora(s)? O dcode enviará as instruções ao modelo automaticamente, o que pode gerar custos. O daemon local precisa estar aberto.`,
     );
     if (!accepted) return;
   }
@@ -440,7 +440,7 @@ async function loadArtifactCatalog(): Promise<void> {
     if (runs.length === 0) {
       const empty = document.createElement('li');
       empty.className = 'artifacts-view__empty';
-      empty.textContent = 'Este workspace ainda não tem runs do Harness.';
+      empty.textContent = 'Este workspace ainda não tem runs do dcode.';
       list.append(empty);
       el('artifact-run-title').textContent = 'Nenhum run encontrado';
       selectedArtifactRun = undefined;
@@ -668,12 +668,12 @@ async function switchWorkspace(workspace: string): Promise<void> {
   el<HTMLButtonElement>('promote-run').hidden = true;
   void updateContext(0);
   try {
-    localStorage.setItem('harness.workspace', workspace);
+    localStorage.setItem('dcx.workspace', workspace);
     saveWorkspacePath(workspace);
   } catch {
     // Keep the selection for this window when storage is unavailable.
   }
-  await loadHarnessData(workspace);
+  await loadDcxData(workspace);
 }
 
 function envNode(glyph: string, label: string, config = false): HTMLElement {
@@ -1779,11 +1779,11 @@ el<HTMLInputElement>('session-search-input').addEventListener('input', (event) =
   void searchSessions(query);
 });
 
-async function loadHarnessData(workspaceOverride?: string): Promise<void> {
+async function loadDcxData(workspaceOverride?: string): Promise<void> {
   try {
     let savedWorkspace: string | null = null;
     try {
-      savedWorkspace = localStorage.getItem('harness.workspace');
+      savedWorkspace = localStorage.getItem('dcx.workspace');
     } catch {
       // Use the configured default when local storage is unavailable.
     }
@@ -1791,7 +1791,7 @@ async function loadHarnessData(workspaceOverride?: string): Promise<void> {
     currentWorkspace = workspace;
     renderStaticRegions(workspace);
     const connection = el('connection-state');
-    connection.textContent = 'Harness conectado';
+    connection.textContent = 'dcode conectado';
     void loadSettings(workspace);
     const sessions = await bridge.sessions(workspace);
     if (sessions[0]) await loadSession(workspace, sessions[0].session_id);
@@ -1806,13 +1806,13 @@ async function loadHarnessData(workspaceOverride?: string): Promise<void> {
     }
     if (!el<HTMLElement>('routines-view').hidden) void loadRoutines();
   } catch (error) {
-    el('connection-state').textContent = 'Harness offline';
-    showNotice('Harness indisponível', error instanceof Error ? error.message : String(error), true);
+    el('connection-state').textContent = 'dcode offline';
+    showNotice('dcode indisponível', error instanceof Error ? error.message : String(error), true);
     renderStaticRegions('Workspace não selecionado');
   }
 }
 
-void loadHarnessData();
+void loadDcxData();
 void updateContext(0);
 setPlaceholder();
 input.focus();

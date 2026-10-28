@@ -1,9 +1,9 @@
 {
-  "name": "@repl/desktop",
+  "name": "@dcode/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Adaptador de desktop do Harness: interface de tres colunas (Electron), renderer sem logica de agente nem estado duravel.",
+  "description": "Adaptador de desktop do dcode: interface de tres colunas (Electron), renderer sem logica de agente nem estado duravel.",
   "engines": {
     "node": ">=20"
   },
@@ -33,16 +33,20 @@
     "typescript": "^5.7.3"
   },
   "build": {
-    "appId": "dev.harness.desktop",
-    "productName": "Harness",
+    "appId": "dev.dcode.desktop",
+    "productName": "dcode",
     "directories": {
       "output": "release"
     },
     "files": ["dist/**/*", "package.json"],
     "extraResources": [
       {
-        "from": "../target/release/harness",
-        "to": "bin/harness"
+        "from": "../target/release/dcx",
+        "to": "bin/dcx"
+      },
+      {
+        "from": "../target/release/dcxd",
+        "to": "bin/dcxd"
       }
     ],
     "afterSign": "tools/notarize.mjs",
@@ -54,7 +58,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "artifactName": "Harness-${version}-${arch}.${ext}"
+      "artifactName": "dcode-${version}-${arch}.${ext}"
     }
   },
   "main": "dist/desktop/main.js"
