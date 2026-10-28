@@ -96,6 +96,16 @@ Os limites globais somam o uso de todas as tarefas e são combinados com os limi
 cargo run -p dcx-cli -- loop status --id ID_DA_FILA
 ```
 
+Para parar a fila com segurança, peça uma pausa. Ela termina a tarefa atual e para antes da próxima, sem deixar nada pela metade:
+
+```sh
+cargo run -p dcx-cli -- loop pause --id ID_DA_FILA
+```
+
+### Acompanhar pelo app
+
+No app desktop, a seção **Filas** do painel da direita mostra cada fila do projeto: em que tarefa está, o progresso, quanto já gastou de cada limite e, quando pausada, o motivo. Use **Pausar** para parar antes da próxima tarefa e **Retomar** para continuar de onde parou. A fila retomada pelo app continua rodando mesmo se você fechar a janela.
+
 ## Escolher um modelo e definir limites
 
 Copie `.env.example` para `.env` na pasta do projeto e preencha as opções desejadas. O arquivo `.env` é ignorado pelo Git.

@@ -155,9 +155,28 @@ pub fn run(mut args: impl Iterator<Item = String>) {
                     std::process::exit(1);
                 }
             }
+            Some("pause") => {
+                if args.next().as_deref() != Some("--id") {
+                    eprintln!("Uso: dcx loop pause --id <loop_id>");
+                    std::process::exit(2);
+                }
+                let id = args.next().unwrap_or_default();
+                if id.is_empty() || args.next().is_some() {
+                    eprintln!("Uso: dcx loop pause --id <loop_id>");
+                    std::process::exit(2);
+                }
+                let result = std::env::current_dir()
+                    .map_err(|error| error.to_string())
+                    .and_then(|workspace| loop_queue::request_pause(&workspace, &id));
+                if let Err(error) = result {
+                    eprintln!("Falha ao pausar a fila: {error}");
+                    std::process::exit(1);
+                }
+                println!("Pausa pedida: a fila {id} para antes da próxima tarefa.");
+            }
             _ => {
                 eprintln!(
-                    "Uso: dcx loop <start --file <tasks.json> | resume --id <loop_id> | status --id <loop_id>>"
+                    "Uso: dcx loop <start --file <tasks.json> | resume --id <loop_id> | status --id <loop_id> | pause --id <loop_id>>"
                 );
                 std::process::exit(2);
             }

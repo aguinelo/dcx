@@ -80,6 +80,27 @@ struct LoopState {
     budget: LoopBudget,
     #[serde(default)]
     usage: LoopUsage,
+    /// The `dcx loop` process driving the queue while it runs; how the app
+    /// tells "running" from "left behind by a crash".
+    #[serde(default)]
+    pid: Option<u32>,
+}
+
+/// What the app shows for a queue: progress, budget use and why it stopped.
+#[derive(Debug, Serialize)]
+pub(crate) struct LoopSummary {
+    id: String,
+    status: &'static str,
+    reason: Option<String>,
+    done: usize,
+    total: usize,
+    current_task: Option<String>,
+    pause_requested: bool,
+    created_at_unix_ms: u64,
+    updated_at_unix_ms: u64,
+    tasks: Vec<LoopTask>,
+    budget: LoopBudget,
+    usage: LoopUsage,
 }
 
 impl LoopBudget {
@@ -244,6 +265,7 @@ pub fn start(manifest_path: &Path) -> Result<(), String> {
         tasks,
         budget,
         usage: LoopUsage::default(),
+        pid: None,
     };
     save(&state)?;
     println!("Fila finita criada: {id} ({} tarefas)", state.tasks.len());
@@ -324,9 +346,12 @@ fn format_status(state: &LoopState) -> String {
 }
 
 fn execute(mut state: LoopState) -> Result<(), String> {
+    state.pid = Some(std::process::id());
+    save(&state)?;
     metrics::set_loop_budget(state.budget.to_metrics(), state.usage.to_metrics())?;
     let result = run_tasks(&mut state);
     sync_usage(&mut state);
+    state.pid = None;
     state.updated_at_unix_ms = now_ms();
     let save_result = save(&state);
     metrics::clear_loop_budget();
@@ -336,6 +361,14 @@ fn execute(mut state: LoopState) -> Result<(), String> {
 
 fn run_tasks(state: &mut LoopState) -> Result<(), String> {
     while state.current_task < state.tasks.len() {
+        if take_pause_request(state) {
+            state.updated_at_unix_ms = now_ms();
+            save(state)?;
+            return Err(format!(
+                "fila pausada a pedido antes da tarefa {}. Retome com `dcx loop resume --id {}`",
+                state.tasks[state.current_task].id, state.id
+            ));
+        }
         if let Some(reason) = state.budget.exhausted(&state.usage) {
             state.updated_at_unix_ms = now_ms();
             save(state)?;
@@ -470,6 +503,115 @@ fn save(state: &LoopState) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
     fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
     fs::rename(&temporary, &path).map_err(|error| error.to_string())
+}
+
+/// Every queue saved in the workspace, newest first.
+pub(crate) fn list(workspace: &Path) -> Result<Vec<LoopSummary>, String> {
+    let dir = workspace.join(".dcx").join("loops");
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("não foi possível ler {}: {error}", dir.display())),
+    };
+    let mut loops = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        let is_state = path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            && !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with('.'));
+        if !is_state {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else { continue };
+        let Ok(state) = serde_json::from_slice::<LoopState>(&bytes) else {
+            continue;
+        };
+        loops.push(summarize(workspace, state));
+    }
+    loops.sort_by_key(|summary| std::cmp::Reverse(summary.updated_at_unix_ms));
+    Ok(loops)
+}
+
+/// Whether the queue's own `dcx loop` process is still alive.
+pub(crate) fn is_running(workspace: &Path, id: &str) -> Result<bool, String> {
+    validate_id(id)?;
+    let bytes =
+        fs::read(state_path(workspace, id)).map_err(|_| format!("fila {id} não encontrada"))?;
+    let state: LoopState = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("estado da fila inválido: {error}"))?;
+    Ok(process_alive(state.pid))
+}
+
+/// Asks a running queue to stop before its next task. The current task is
+/// never interrupted, so no run is left half-applied.
+pub(crate) fn request_pause(workspace: &Path, id: &str) -> Result<(), String> {
+    validate_id(id)?;
+    if !state_path(workspace, id).is_file() {
+        return Err(format!("fila {id} não encontrada"));
+    }
+    fs::write(pause_path(workspace, id), b"")
+        .map_err(|error| format!("não foi possível pedir a pausa da fila {id}: {error}"))
+}
+
+fn take_pause_request(state: &LoopState) -> bool {
+    fs::remove_file(pause_path(&state.workspace, &state.id)).is_ok()
+}
+
+fn summarize(workspace: &Path, state: LoopState) -> LoopSummary {
+    let total = state.tasks.len();
+    let done = state
+        .tasks
+        .iter()
+        .filter(|task| task.status == "done")
+        .count();
+    let current = state.tasks.get(state.current_task);
+    let (status, reason) = if done == total {
+        ("done", None)
+    } else if process_alive(state.pid) {
+        ("running", None)
+    } else {
+        let reason = current
+            .and_then(|task| task.error.as_deref())
+            .map(|error| error.lines().next().unwrap_or_default().to_owned())
+            .or_else(|| {
+                current
+                    .filter(|task| task.status == "running")
+                    .map(|_| "execução interrompida antes de terminar a tarefa".to_owned())
+            })
+            .or_else(|| state.budget.exhausted(&state.usage));
+        ("paused", reason)
+    };
+    LoopSummary {
+        pause_requested: pause_path(workspace, &state.id).is_file(),
+        current_task: (done < total)
+            .then(|| current.map(|task| task.id.clone()))
+            .flatten(),
+        id: state.id,
+        status,
+        reason,
+        done,
+        total,
+        created_at_unix_ms: state.created_at_unix_ms,
+        updated_at_unix_ms: state.updated_at_unix_ms,
+        tasks: state.tasks,
+        budget: state.budget,
+        usage: state.usage,
+    }
+}
+
+fn process_alive(pid: Option<u32>) -> bool {
+    pid.is_some_and(crate::worker::process_is_running)
+}
+
+fn pause_path(workspace: &Path, id: &str) -> PathBuf {
+    workspace
+        .join(".dcx")
+        .join("loops")
+        .join(format!("{id}.pause"))
 }
 
 fn state_path(workspace: &Path, id: &str) -> PathBuf {
@@ -646,6 +788,7 @@ mod tests {
                 cost_complete: true,
                 duration_ms: 30_000,
             },
+            pid: None,
         };
 
         let text = format_status(&state);
@@ -654,5 +797,158 @@ mod tests {
         assert!(text.contains("2 chamadas · US$ 0.1200 · 30s"));
         assert!(text.contains("[paused] two"));
         assert!(text.contains("aguardando aprovação"));
+    }
+
+    fn temp_workspace(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("relógio")
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("dcx-loop-{name}-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&path).expect("workspace temporário");
+        path
+    }
+
+    fn sample_state(workspace: &Path, id: &str, statuses: &[&str], updated: u64) -> LoopState {
+        let tasks: Vec<LoopTask> = statuses
+            .iter()
+            .enumerate()
+            .map(|(index, status)| LoopTask {
+                id: format!("task-{}", index + 1),
+                request: format!("Pedido {}", index + 1),
+                status: (*status).to_owned(),
+                run_id: None,
+                error: None,
+            })
+            .collect();
+        let current_task = statuses
+            .iter()
+            .position(|status| *status != "done")
+            .unwrap_or(statuses.len());
+        LoopState {
+            schema_version: LOOP_SCHEMA_VERSION,
+            id: id.to_owned(),
+            workspace: workspace.to_path_buf(),
+            created_at_unix_ms: 1,
+            updated_at_unix_ms: updated,
+            current_task,
+            tasks,
+            budget: LoopBudget::default(),
+            usage: LoopUsage::default(),
+            pid: None,
+        }
+    }
+
+    #[test]
+    fn list_summarizes_progress_and_derived_status_newest_first() {
+        let workspace = temp_workspace("list");
+        save(&sample_state(
+            &workspace,
+            "loop-done",
+            &["done", "done"],
+            10,
+        ))
+        .expect("salvar");
+        let mut paused = sample_state(&workspace, "loop-paused", &["done", "paused"], 20);
+        paused.tasks[1].error = Some("aguardando aprovação\nmais detalhes".to_owned());
+        save(&paused).expect("salvar");
+        fs::write(
+            workspace.join(".dcx/loops/.loop-tmp.tmp"),
+            "lixo de escrita atômica",
+        )
+        .expect("tmp");
+
+        let loops = list(&workspace).expect("listar");
+
+        assert_eq!(loops.len(), 2);
+        assert_eq!(loops[0].id, "loop-paused");
+        assert_eq!(loops[0].status, "paused");
+        assert_eq!(loops[0].done, 1);
+        assert_eq!(loops[0].total, 2);
+        assert_eq!(loops[0].current_task.as_deref(), Some("task-2"));
+        assert_eq!(loops[0].reason.as_deref(), Some("aguardando aprovação"));
+        assert_eq!(loops[1].id, "loop-done");
+        assert_eq!(loops[1].status, "done");
+        assert_eq!(loops[1].reason, None);
+        assert_eq!(loops[1].current_task, None);
+    }
+
+    #[test]
+    fn a_loop_whose_process_is_alive_is_running() {
+        let workspace = temp_workspace("running");
+        let mut state = sample_state(&workspace, "loop-live", &["running", "queued"], 1);
+        state.pid = Some(std::process::id());
+        save(&state).expect("salvar");
+
+        let loops = list(&workspace).expect("listar");
+
+        assert_eq!(loops[0].status, "running");
+        assert_eq!(loops[0].reason, None);
+    }
+
+    #[test]
+    fn a_loop_left_running_by_a_dead_process_shows_as_interrupted() {
+        let workspace = temp_workspace("crashed");
+        let mut state = sample_state(&workspace, "loop-crashed", &["running"], 1);
+        state.pid = Some(u32::MAX);
+        save(&state).expect("salvar");
+
+        let loops = list(&workspace).expect("listar");
+
+        assert_eq!(loops[0].status, "paused");
+        assert!(
+            loops[0]
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("interrompida"),
+            "{:?}",
+            loops[0].reason
+        );
+    }
+
+    #[test]
+    fn an_exhausted_budget_is_the_pause_reason() {
+        let workspace = temp_workspace("budget");
+        let mut state = sample_state(&workspace, "loop-budget", &["done", "queued"], 1);
+        state.budget.max_model_calls = Some(1);
+        state.usage.model_calls = 1;
+        save(&state).expect("salvar");
+
+        let loops = list(&workspace).expect("listar");
+
+        assert_eq!(loops[0].status, "paused");
+        assert!(
+            loops[0]
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("limite de 1 chamada"),
+            "{:?}",
+            loops[0].reason
+        );
+    }
+
+    #[test]
+    fn a_pause_request_stops_the_queue_before_the_next_task() {
+        let workspace = temp_workspace("pause");
+        let mut state = sample_state(&workspace, "loop-pause", &["queued"], 1);
+        save(&state).expect("salvar");
+
+        request_pause(&workspace, "loop-pause").expect("pedir pausa");
+        assert!(list(&workspace).expect("listar")[0].pause_requested);
+
+        let error = run_tasks(&mut state).expect_err("a fila deve parar");
+
+        assert!(error.contains("pausada a pedido"), "{error}");
+        assert_eq!(state.tasks[0].status, "queued");
+        assert!(!list(&workspace).expect("listar")[0].pause_requested);
+    }
+
+    #[test]
+    fn pausing_an_unknown_loop_fails() {
+        let workspace = temp_workspace("unknown");
+        assert!(request_pause(&workspace, "loop-nope").is_err());
     }
 }

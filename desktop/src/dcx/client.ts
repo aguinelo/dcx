@@ -90,6 +90,42 @@ export interface DcxAccount {
   email?: string;
 }
 
+export interface DcxLoopBudget {
+  max_model_calls?: number | null;
+  max_cost_usd?: number | null;
+  max_duration_minutes?: number | null;
+}
+
+export interface DcxLoopUsage {
+  model_calls: number;
+  known_cost_usd: number;
+  cost_complete: boolean;
+  duration_ms: number;
+}
+
+export interface DcxLoopTask {
+  id: string;
+  request: string;
+  status: string;
+  run_id: string | null;
+  error: string | null;
+}
+
+export interface DcxLoopSummary {
+  id: string;
+  status: 'running' | 'paused' | 'done';
+  reason: string | null;
+  done: number;
+  total: number;
+  current_task: string | null;
+  pause_requested: boolean;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+  tasks: DcxLoopTask[];
+  budget: DcxLoopBudget;
+  usage: DcxLoopUsage;
+}
+
 export interface DcxPullRequest {
   title: string;
   repo: string;
@@ -253,6 +289,18 @@ export class DcxClient {
     return this.get(
       `/runs/status?workspace=${encodeURIComponent(workspace)}&run_id=${encodeURIComponent(runId)}`,
     );
+  }
+
+  async loops(workspace: string): Promise<{ loops: DcxLoopSummary[] }> {
+    return this.get(`/loops?workspace=${encodeURIComponent(workspace)}`);
+  }
+
+  async pauseLoop(workspace: string, id: string): Promise<void> {
+    await this.post('/loops/pause', { workspace, id });
+  }
+
+  async resumeLoop(workspace: string, id: string): Promise<void> {
+    await this.post('/loops/resume', { workspace, id });
   }
 
   async runCatalog(workspace: string): Promise<{ runs: DcxRunArtifactSummary[] }> {

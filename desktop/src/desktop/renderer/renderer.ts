@@ -5,6 +5,8 @@
  * and sends prompts back. The only reason this file exists is the DOM.
  */
 
+import type { DcxLoopSummary } from '../../dcx/client.ts';
+import { describeLoop } from './loops.ts';
 import type { BackgroundTask } from './mock.ts';
 
 interface AgentEventPayload {
@@ -55,6 +57,9 @@ interface ReplBridge {
   approve(workspace: string, sessionId: string): Promise<unknown>;
   start(workspace: string, sessionId: string): Promise<{ run_id: string; status: string }>;
   cancelRun(workspace: string, runId: string): Promise<void>;
+  loops(workspace: string): Promise<{ loops: DcxLoopSummary[] }>;
+  pauseLoop(workspace: string, id: string): Promise<void>;
+  resumeLoop(workspace: string, id: string): Promise<void>;
   runCatalog(workspace: string): Promise<{ runs: Array<{ run_id: string; title: string; summary: string; status: string; criteria_passed: number | null; criteria_total: number | null; states: string[]; files: string[] }> }>;
   artifact(workspace: string, runId: string, name: string): Promise<{ name: string; content: string }>;
   searchSessions(workspace: string, query: string): Promise<{ results: Array<{ session_id: string; title: string; snippet: string; role: string; updated_at_unix_ms: number }> }>;
@@ -768,7 +773,7 @@ function changeNode(pr: { title: string; repo: string; number: number; url: stri
     `<span class="change__add">+${pr.additions}</span>`,
     `<span class="change__del">-${pr.deletions}</span>`,
     `<span>${pr.files} arquivo${pr.files === 1 ? '' : 's'}</span>`,
-    `<span class="change__status" style="background:${pr.ready ? 'var(--ok)' : 'var(--muted)'}" title="${pr.ready ? 'Pronto para revisão' : 'Rascunho'}"></span>`,
+    `<span class="change__status${pr.ready ? '' : ' change__status--draft'}" title="${pr.ready ? 'Pronto para revisão' : 'Rascunho'}"></span>`,
     '</div>',
   ].join('');
   node.addEventListener('click', () => shellOpen(pr.url));
@@ -1058,6 +1063,65 @@ window.setInterval(() => {
   if (changed) renderBackground();
 }, 1000);
 
+/* ── Task queues ─────────────────────────────────────────────── */
+
+function loopNode(summary: DcxLoopSummary): HTMLElement {
+  const view = describeLoop(summary);
+  const node = document.createElement('li');
+  node.className = `loop loop--${summary.status}`;
+  node.dataset.loopId = summary.id;
+  const action = view.canPause
+    ? '<button class="btn btn--small" data-loop-action="pause">Pausar</button>'
+    : view.canResume
+      ? '<button class="btn btn--small" data-loop-action="resume">Retomar</button>'
+      : '';
+  node.innerHTML = [
+    '<div class="loop__head">',
+    `<span class="loop__status">${escapeHtml(view.statusLabel)}</span>`,
+    `<span class="loop__progress">${escapeHtml(view.progress)}</span>`,
+    action,
+    '</div>',
+    '<div class="gauge__bar"><div class="gauge__fill"></div></div>',
+    view.detail ? `<div class="loop__detail">${escapeHtml(view.detail)}</div>` : '',
+    `<div class="loop__spend">${escapeHtml(view.spend)}</div>`,
+  ].join('');
+  node.querySelector<HTMLElement>('.gauge__fill')!.style.width = `${view.percent}%`;
+  return node;
+}
+
+async function renderLoops(): Promise<void> {
+  if (!currentWorkspace) return;
+  try {
+    const { loops } = await bridge.loops(currentWorkspace);
+    const list = el<HTMLUListElement>('loops');
+    if (loops.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'loop loop--empty';
+      empty.textContent = 'Nenhuma fila neste workspace.';
+      list.replaceChildren(empty);
+      return;
+    }
+    list.replaceChildren(...loops.map(loopNode));
+  } catch {
+    // Daemon offline: keep the last known state; the connection badge already says so.
+  }
+}
+
+async function handleLoopAction(button: HTMLElement): Promise<void> {
+  const id = button.closest<HTMLElement>('[data-loop-id]')?.dataset.loopId;
+  if (!id || !currentWorkspace) return;
+  button.setAttribute('disabled', '');
+  try {
+    if (button.dataset.loopAction === 'pause') await bridge.pauseLoop(currentWorkspace, id);
+    else await bridge.resumeLoop(currentWorkspace, id);
+  } catch (error) {
+    showNotice('Não foi possível controlar a fila', error instanceof Error ? error.message : String(error), true);
+  }
+  await renderLoops();
+}
+
+window.setInterval(() => void renderLoops(), 5000);
+
 /* ── Transcript ──────────────────────────────────────────────── */
 
 function row(cls: string, html: string): HTMLElement {
@@ -1304,11 +1368,12 @@ function breakdownRow(label: string, tokens: number, pct: number, color?: string
   const node = document.createElement('li');
   if (!color) node.classList.add('is-headroom');
   node.innerHTML = [
-    `<span class="swatch"${color ? ` style="background:${color}"` : ''}></span>`,
+    '<span class="swatch"></span>',
     `<span class="label">${escapeHtml(label)}</span>`,
     `<span class="tokens">${formatTokens(tokens)}</span>`,
     `<span class="pct">${color ? `${pct}%` : ''}</span>`,
   ].join('');
+  if (color) node.querySelector<HTMLElement>('.swatch')!.style.background = color;
   return node;
 }
 
@@ -1658,6 +1723,12 @@ document.addEventListener('change', (event) => {
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
 
+  const loopButton = target.closest<HTMLElement>('[data-loop-action]');
+  if (loopButton) {
+    void handleLoopAction(loopButton);
+    return;
+  }
+
   const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
   if (action === 'add-context-repo') {
     event.stopPropagation();
@@ -1805,6 +1876,7 @@ async function loadDcxData(workspaceOverride?: string): Promise<void> {
       void searchSessions(el<HTMLInputElement>('session-search-input').value);
     }
     if (!el<HTMLElement>('routines-view').hidden) void loadRoutines();
+    void renderLoops();
   } catch (error) {
     el('connection-state').textContent = 'dcode offline';
     showNotice('dcode indisponível', error instanceof Error ? error.message : String(error), true);

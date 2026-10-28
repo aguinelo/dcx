@@ -34,3 +34,33 @@ test('run events reconnect from the last delivered event', async () => {
   assert.match(urls[0] ?? '', /since=0/);
   assert.match(urls[1] ?? '', /since=1/);
 });
+
+test('loops are listed, paused and resumed through the daemon', async () => {
+  const requests: Array<{ url: string; method: string; body: string | undefined }> = [];
+  const client = new DcxClient({
+    baseUrl: 'http://dcx.test',
+    fetchImpl: async (input, init) => {
+      requests.push({ url: String(input), method: init?.method ?? 'GET', body: init?.body as string | undefined });
+      return new Response(JSON.stringify({ loops: [], status: 'ok' }), { status: 200 });
+    },
+  });
+
+  await client.loops('/ws/proj');
+  await client.pauseLoop('/ws/proj', 'loop-1');
+  await client.resumeLoop('/ws/proj', 'loop-1');
+
+  assert.equal(requests[0]?.url, 'http://dcx.test/loops?workspace=%2Fws%2Fproj');
+  assert.equal(requests[1]?.method, 'POST');
+  assert.equal(requests[1]?.url, 'http://dcx.test/loops/pause');
+  assert.deepEqual(JSON.parse(requests[1]?.body ?? '{}'), { workspace: '/ws/proj', id: 'loop-1' });
+  assert.equal(requests[2]?.url, 'http://dcx.test/loops/resume');
+});
+
+test('a refused resume surfaces the daemon error message', async () => {
+  const client = new DcxClient({
+    baseUrl: 'http://dcx.test',
+    fetchImpl: async () => new Response(JSON.stringify({ error: 'a fila já está em execução' }), { status: 409 }),
+  });
+
+  await assert.rejects(client.resumeLoop('/ws', 'loop-1'), /já está em execução/);
+});

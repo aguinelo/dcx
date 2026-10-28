@@ -93,7 +93,7 @@ pub fn start(workspace: &Path, run_id: &str, session_id: &str) -> Result<(), Str
 /// Runs are always driven by the `dcx` CLI. When the daemon itself is the
 /// `dcxd` binary, `dcx` is expected right next to it (cargo and the app bundle
 /// both put them side by side), since `dcxd` only knows how to serve.
-fn cli_executable() -> Result<PathBuf, String> {
+pub(crate) fn cli_executable() -> Result<PathBuf, String> {
     let current = std::env::current_exe().map_err(|error| error.to_string())?;
     if current.file_stem().and_then(|stem| stem.to_str()) != Some("dcxd") {
         return Ok(current);
@@ -298,7 +298,7 @@ pub fn recover(workspace: &Path) {
 }
 
 #[cfg(unix)]
-fn process_is_running(pid: u32) -> bool {
+pub(crate) fn process_is_running(pid: u32) -> bool {
     let pid_text = pid.to_string();
     let Ok(output) = Command::new("ps")
         .args(["-p", &pid_text, "-o", "stat="])

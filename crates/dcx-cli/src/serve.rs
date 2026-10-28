@@ -49,6 +49,12 @@ struct CancelRunRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct LoopRequest {
+    workspace: String,
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct SetPinnedRequest {
     workspace: String,
     session_id: String,
@@ -89,7 +95,12 @@ pub fn run(bind: &str) -> Result<(), String> {
     if let Ok(workspace) = std::env::current_dir() {
         crate::worker::recover(&workspace);
     }
-    println!("dcxd ouvindo em http://{bind}");
+    // Report the bound address, not the requested one, so `--bind host:0`
+    // tells the caller which port the OS picked.
+    let address = listener
+        .local_addr()
+        .map_or_else(|_| bind.to_owned(), |address| address.to_string());
+    println!("dcxd ouvindo em http://{address}");
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -159,6 +170,9 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("POST", "/routines") => handle_save_routine(&mut stream, body),
         ("POST", "/routines/delete") => handle_delete_routine(&mut stream, body),
         ("POST", "/sessions/pin") => handle_set_pinned(&mut stream, body),
+        ("GET", "/loops") => handle_loops(&mut stream, query),
+        ("POST", "/loops/pause") => handle_loop_pause(&mut stream, body),
+        ("POST", "/loops/resume") => handle_loop_resume(&mut stream, body),
         ("GET", "/session") => handle_session(&mut stream, query),
         ("POST", "/chat") => handle_chat(&mut stream, body),
         ("POST", "/runs/from-session") => handle_promote(&mut stream, body),
@@ -300,6 +314,99 @@ fn handle_delete_routine(stream: &mut TcpStream, body: &str) -> Result<(), Strin
         stream,
         200,
         &serde_json::json!({"id": request.id, "deleted": true}).to_string(),
+    )
+}
+
+fn handle_loops(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let Some(workspace) = query_value(query, "workspace") else {
+        return respond_error(stream, 400, "GET /loops exige ?workspace=<diretório>");
+    };
+    let workspace = PathBuf::from(percent_decode(&workspace)?);
+    match crate::loop_queue::list(&workspace) {
+        Ok(loops) => respond_json(
+            stream,
+            200,
+            &serde_json::json!({"loops": loops}).to_string(),
+        ),
+        Err(error) => respond_error(stream, 500, &error),
+    }
+}
+
+fn handle_loop_pause(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: LoopRequest = match serde_json::from_str(body.trim()) {
+        Ok(request) => request,
+        Err(error) => return respond_error(stream, 400, &format!("corpo JSON inválido: {error}")),
+    };
+    match crate::loop_queue::request_pause(Path::new(&request.workspace), &request.id) {
+        Ok(()) => respond_json(
+            stream,
+            202,
+            &serde_json::json!({"status": "pause_requested", "id": request.id}).to_string(),
+        ),
+        Err(error) => respond_error(stream, 404, &error),
+    }
+}
+
+/// Resumes a queue as a detached `dcx loop resume`, logging to
+/// `.dcx/loops/<id>.log` so the app can be closed while it runs.
+fn handle_loop_resume(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: LoopRequest = match serde_json::from_str(body.trim()) {
+        Ok(request) => request,
+        Err(error) => return respond_error(stream, 400, &format!("corpo JSON inválido: {error}")),
+    };
+    let workspace = PathBuf::from(&request.workspace);
+    match crate::loop_queue::is_running(&workspace, &request.id) {
+        Ok(true) => return respond_error(stream, 409, "a fila já está em execução"),
+        Ok(false) => {}
+        Err(error) => return respond_error(stream, 404, &error),
+    }
+    match spawn_loop_resume(&workspace, &request.id) {
+        Ok(()) => respond_json(
+            stream,
+            202,
+            &serde_json::json!({"status": "resuming", "id": request.id}).to_string(),
+        ),
+        Err(error) => respond_error(stream, 500, &error),
+    }
+}
+
+fn spawn_loop_resume(workspace: &Path, id: &str) -> Result<(), String> {
+    let log_path = workspace
+        .join(".dcx")
+        .join("loops")
+        .join(format!("{id}.log"));
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| format!("não foi possível abrir {}: {error}", log_path.display()))?;
+    let stderr = log.try_clone().map_err(|error| error.to_string())?;
+    let mut command = std::process::Command::new(crate::worker::cli_executable()?);
+    command
+        .args(["loop", "resume", "--id", id])
+        .current_dir(workspace)
+        .stdin(std::process::Stdio::null())
+        .stdout(log)
+        .stderr(stderr);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("não foi possível retomar a fila: {error}"))?;
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+fn respond_error(stream: &mut TcpStream, status: u16, message: &str) -> Result<(), String> {
+    respond_json(
+        stream,
+        status,
+        &serde_json::json!({"error": message}).to_string(),
     )
 }
 
@@ -1059,7 +1166,10 @@ fn handle_chat(stream: &mut TcpStream, body: &str) -> Result<(), String> {
 fn respond_json(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), String> {
     let reason = match status {
         200 => "OK",
+        202 => "Accepted",
+        400 => "Bad Request",
         404 => "Not Found",
+        409 => "Conflict",
         _ => "Error",
     };
     let response = format!(
