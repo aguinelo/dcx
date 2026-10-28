@@ -1,0 +1,50 @@
+{
+	"schema_version": 1,
+	"name": "fixture-healthy",
+	"kind": "e2e",
+	"provider": "minimax",
+	"started_at": "2026-01-01T00:00:00.000Z",
+	"duration_ms": 1200,
+	"ok": true,
+	"checks": [
+		{
+			"name": "chat",
+			"ok": true,
+			"provider": "minimax",
+			"cost_usd": 0.01,
+			"duration_ms": 1000,
+			"stdout": "OK\n",
+			"stderr": "",
+			"workspace_unchanged": true,
+			"files_changed": []
+		},
+		{
+			"name": "daemon",
+			"ok": true,
+			"provider": "minimax",
+			"cost_usd": 0.01,
+			"duration_ms": 200,
+			"stdout": "",
+			"stderr": "",
+			"workspace_unchanged": true,
+			"files_changed": []
+		}
+	],
+	"metrics": {
+		"model_calls": 2,
+		"cost_usd": 0.02,
+		"cost_complete": true
+	},
+	"expected": {
+		"provider": "minimax",
+		"checks": ["chat", "daemon"],
+		"max_duration_ms": 5000,
+		"max_cost_usd": 0.1,
+		"max_model_calls": 4,
+		"allow_writes": false
+	},
+	"events": [
+		{ "sequence": 1, "event_type": "run.started" },
+		{ "sequence": 2, "event_type": "run.completed" }
+	]
+}

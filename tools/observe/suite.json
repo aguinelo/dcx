@@ -1,0 +1,60 @@
+{
+	"schema_version": 1,
+	"name": "runtime-observability",
+	"sensors": [
+		{
+			"id": "visible-no-unhandled-exception",
+			"criterion_id": "logs-clean",
+			"type": "test",
+			"kind": "computational",
+			"visibility": "visible",
+			"purpose": "observability",
+			"check": "stdout e stderr não contêm traceback, pânico ou exceção não tratada."
+		},
+		{
+			"id": "visible-behavior-contract",
+			"criterion_id": "behavior-contract",
+			"type": "test",
+			"kind": "computational",
+			"visibility": "visible",
+			"purpose": "observability",
+			"check": "Checks esperados existem, passaram, usam o provider esperado e mantêm a ordem dos eventos."
+		},
+		{
+			"id": "visible-budget",
+			"criterion_id": "budget",
+			"type": "test",
+			"kind": "computational",
+			"visibility": "visible",
+			"purpose": "observability",
+			"check": "Custo, chamadas de modelo, duração e completude das métricas ficam dentro do esperado."
+		},
+		{
+			"id": "hidden-secret-leak",
+			"criterion_id": "logs-clean",
+			"type": "test",
+			"kind": "computational",
+			"visibility": "hidden",
+			"purpose": "observability",
+			"check": "Logs não contêm chaves de API nem padrões de segredo."
+		},
+		{
+			"id": "hidden-silent-fallback",
+			"criterion_id": "behavior-contract",
+			"type": "test",
+			"kind": "computational",
+			"visibility": "hidden",
+			"purpose": "observability",
+			"check": "Uma troca de provider só é aceita se estiver declarada como fallback."
+		},
+		{
+			"id": "hidden-workspace-mutation",
+			"criterion_id": "behavior-contract",
+			"type": "test",
+			"kind": "computational",
+			"visibility": "hidden",
+			"purpose": "observability",
+			"check": "O run não altera o projeto fora do esperado nem produz caminhos absolutos ou com .."
+		}
+	]
+}

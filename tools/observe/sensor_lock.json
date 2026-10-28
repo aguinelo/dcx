@@ -1,0 +1,37 @@
+{
+	"schema_version": 1,
+	"suite_sha256": "9a7621cf6da257ad680d6be459d9cb2bb68e3be387858168f9a656d8663dff03",
+	"contract_sha256": "99c728d1a516ebdb1c84e1ceb1737e7e2bc46293ccaf6d6b1c24ea883a063800",
+	"sensors": [
+		{
+			"sensor_id": "visible-no-unhandled-exception",
+			"filename": "visible_no_unhandled_exception.py",
+			"sha256": "37aeaf58906ad2460ff52def88f25625861dec040d31826cb5a4dde4f0dfaa9a"
+		},
+		{
+			"sensor_id": "visible-behavior-contract",
+			"filename": "visible_behavior_contract.py",
+			"sha256": "3ab0add012fcd7c55bab718f8e57af5dfe401c2cbe78032a0595b1ae7a1c7f60"
+		},
+		{
+			"sensor_id": "visible-budget",
+			"filename": "visible_budget.py",
+			"sha256": "0da8fa41b5cabc045d472d728cc5f3fd05efd28aceb70090dd4633783eff0bcc"
+		},
+		{
+			"sensor_id": "hidden-secret-leak",
+			"filename": "hidden_secret_leak.py",
+			"sha256": "22c6db51deac7581163c2491549d3d30e02e63708e9c2ee60e33bb614e0fb064"
+		},
+		{
+			"sensor_id": "hidden-silent-fallback",
+			"filename": "hidden_silent_fallback.py",
+			"sha256": "44ef26836afab28921ffce516b76f55b62ca2bc08cf45c998ee0aa22adf8b450"
+		},
+		{
+			"sensor_id": "hidden-workspace-mutation",
+			"filename": "hidden_workspace_mutation.py",
+			"sha256": "148b8870397928f8414ccc23c9cda7283bd0a22549eb7a072095fc61cecda846"
+		}
+	]
+}

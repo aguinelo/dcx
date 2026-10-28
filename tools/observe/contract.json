@@ -1,0 +1,18 @@
+{
+	"schema_version": 1,
+	"goal": "Observar logs, exceções e desvios de comportamento em runs reais.",
+	"criteria": [
+		{
+			"id": "logs-clean",
+			"description": "Logs não contêm exceções não tratadas nem segredos."
+		},
+		{
+			"id": "behavior-contract",
+			"description": "Provider, checks, eventos e workspace seguem o comportamento esperado."
+		},
+		{
+			"id": "budget",
+			"description": "Custo, chamadas de modelo e duração ficam dentro do orçamento."
+		}
+	]
+}

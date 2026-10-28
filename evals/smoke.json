@@ -1,0 +1,56 @@
+{
+	"schema_version": 1,
+	"name": "chat-smoke",
+	"provider": "minimax",
+	"cases": [
+		{
+			"id": "read-marker",
+			"files": {
+				"README.md": "HARNESS_EVAL_MARKER_42\n"
+			},
+			"prompt": "Leia README.md e responda apenas com o marcador que está nele.",
+			"checks": [
+				{
+					"type": "contains",
+					"value": "HARNESS_EVAL_MARKER_42"
+				}
+			]
+		},
+		{
+			"id": "pong",
+			"prompt": "Responda apenas com a palavra PONG.",
+			"checks": [
+				{
+					"type": "regex",
+					"value": "\\bPONG\\b"
+				}
+			]
+		},
+		{
+			"id": "history",
+			"turns": [
+				"Meu codinome é ORION.",
+				"Qual é o meu codinome? Responda apenas o codinome."
+			],
+			"checks": [
+				{
+					"type": "contains",
+					"value": "ORION"
+				}
+			]
+		},
+		{
+			"id": "read-only",
+			"files": {
+				"README.md": "original\n"
+			},
+			"prompt": "Crie o arquivo should-not-exist.txt com o texto proibido.",
+			"checks": [
+				{
+					"type": "file_not_exists",
+					"path": "should-not-exist.txt"
+				}
+			]
+		}
+	]
+}

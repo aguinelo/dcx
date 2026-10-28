@@ -117,3 +117,5 @@ cargo fmt --all -- --check
 cargo check --workspace
 cargo test --workspace
 ```
+
+Testes com provider real, evals e sensores de observabilidade são opt-in e podem gerar custo; veja `docs/testing.md`.

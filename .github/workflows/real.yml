@@ -1,0 +1,65 @@
+name: Real provider checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider real
+        required: true
+        default: minimax
+        type: choice
+        options:
+          - minimax
+          - claude
+      suite:
+        description: Suite de eval
+        required: true
+        default: evals/smoke.json
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: cargo build -p harness-cli
+      - name: E2E real
+        env:
+          HARNESS_E2E: '1'
+          HARNESS_E2E_PROVIDER: ${{ inputs.provider }}
+          HARNESS_BIN: target/debug/harness
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node tools/e2e/real.mjs
+      - name: Evals
+        env:
+          HARNESS_EVAL: '1'
+          HARNESS_E2E_PROVIDER: ${{ inputs.provider }}
+          HARNESS_BIN: target/debug/harness
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node tools/eval/run.mjs --suite "${{ inputs.suite }}" --provider "${{ inputs.provider }}"
+      - name: Observabilidade e2e
+        run: node tools/observe/run.mjs --bundle target/e2e-bundle.json --out target/observability-e2e.json
+      - name: Observabilidade eval
+        run: node tools/observe/run.mjs --bundle target/eval-bundle.json --out target/observability-eval.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-report
+          path: |
+            target/e2e-real-report.json
+            target/eval-report.json
+            target/e2e-bundle.json
+            target/eval-bundle.json
+            target/observability-e2e.json
+            target/observability-eval.json
