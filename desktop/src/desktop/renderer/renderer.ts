@@ -96,6 +96,7 @@ interface ReplBridge {
   pickFile(): Promise<string[]>;
   which(cmd: string): Promise<{ path: string | null }>;
   openExternal(url: string): Promise<void>;
+  logPath(): Promise<string>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;

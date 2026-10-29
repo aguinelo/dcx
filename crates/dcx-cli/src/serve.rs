@@ -1,12 +1,15 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::chat;
+use crate::daemon_log::DaemonLog;
 
 #[derive(Debug, Deserialize)]
 struct ChatRequest {
@@ -114,19 +117,73 @@ pub fn run(bind: &str) -> Result<(), String> {
         .local_addr()
         .map_or_else(|_| bind.to_owned(), |address| address.to_string());
     println!("dcxd ouvindo em http://{address}");
+
+    let home = dirs_home();
+    let log: Arc<Option<DaemonLog>> = Arc::new(home.and_then(|h| DaemonLog::open(&h).ok()));
+    if let Some(logger) = log.as_ref().as_ref() {
+        logger.write(&format!("daemon started on {address}"));
+    }
+
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| {
-                    if let Err(error) = handle(stream) {
-                        eprintln!("Erro no servidor: {error}");
+                let log = Arc::clone(&log);
+                thread::spawn(move || {
+                    let started = Instant::now();
+                    let logger_ref = log.as_ref().as_ref();
+                    match handle_logged(stream, logger_ref, started) {
+                        Ok(()) => {}
+                        Err(error) => eprintln!("Erro no servidor: {error}"),
                     }
                 });
             }
             Err(error) => eprintln!("Conexão recusada: {error}"),
         }
     }
+
+    if let Some(logger) = log.as_ref().as_ref() {
+        logger.write("daemon stopped");
+    }
     Ok(())
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(dirs_sys_home)
+}
+
+#[cfg(unix)]
+fn dirs_sys_home() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(unix))]
+fn dirs_sys_home() -> Option<PathBuf> {
+    None
+}
+
+fn handle_logged(
+    stream: TcpStream,
+    log: Option<&DaemonLog>,
+    started: Instant,
+) -> Result<(), String> {
+    // Peek at a clone of the peer address for logging; the stream itself goes to handle().
+    let peer = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
+    // We can't clone TcpStream, so we log after handle() returns using only the duration.
+    // Method/route logging would require restructuring handle(); log at connection level instead.
+    let result = handle(stream);
+    let ms = started.elapsed().as_millis();
+    if let Some(logger) = log {
+        match &result {
+            Ok(()) => logger.write(&format!("connection {peer} {ms}ms ok")),
+            Err(e) => logger.write(&format!("connection {peer} {ms}ms ERROR: {e}")),
+        }
+    }
+    result
 }
 
 fn handle(mut stream: TcpStream) -> Result<(), String> {

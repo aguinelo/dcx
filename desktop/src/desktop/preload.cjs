@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('repl', {
   pickFile: () => ipcRenderer.invoke('env:pickFile'),
   which: (cmd) => ipcRenderer.invoke('env:which', cmd),
   openExternal: (url) => ipcRenderer.invoke('env:openExternal', url),
+  logPath: () => ipcRenderer.invoke('env:logPath'),
   promote: (workspace, sessionId) => ipcRenderer.invoke('dcx:promote', workspace, sessionId),
   approve: (workspace, sessionId) => ipcRenderer.invoke('dcx:approve', workspace, sessionId),
   start: (workspace, sessionId) => ipcRenderer.invoke('dcx:start', workspace, sessionId),

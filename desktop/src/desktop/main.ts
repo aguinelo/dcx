@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import { access, realpath } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, Menu, app, dialog, ipcMain, shell } from 'electron';
@@ -461,6 +462,8 @@ ipcMain.handle('env:openExternal', (_event, url: string) => {
   const allowed = ['https://cli.github.com', 'https://claude.ai', 'https://github.com/anthropics'];
   if (allowed.some((prefix) => url.startsWith(prefix))) return shell.openExternal(url);
 });
+
+ipcMain.handle('env:logPath', () => path.join(os.homedir(), '.dcx', 'daemon.log'));
 
 ipcMain.handle('auth:status', async () => {
   try {

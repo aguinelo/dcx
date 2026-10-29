@@ -1,12 +1,14 @@
 mod chat;
 mod claude;
 mod codex;
+mod daemon_log;
 mod demo;
 mod env_file;
 mod events;
 mod interactive;
 mod jobs;
 mod lock;
+mod logs;
 mod loop_queue;
 mod metrics;
 mod providers;
@@ -314,12 +316,18 @@ pub fn run(mut args: impl Iterator<Item = String>) {
                 std::process::exit(2);
             }
         },
+        Some("logs") => {
+            if let Err(error) = logs::run(args) {
+                eprintln!("Falha ao exibir logs: {error}");
+                std::process::exit(1);
+            }
+        }
         Some("--version" | "-V") if args.next().is_none() => {
             println!("dcx {}", env!("CARGO_PKG_VERSION"));
         }
         _ => {
             eprintln!(
-                "Uso: dcx <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|loop start --file <tasks.json>|loop resume --id <loop_id>|loop status --id <loop_id>|resume --run <run_id>|dispute --run <id> ...|state prune ...|--version|run ...>"
+                "Uso: dcx <states|schemas --write|--check [DIR]|chat [--workspace <dir>] [--session <id>|--list]|serve [--bind <host:porta>]|loop start --file <tasks.json>|loop resume --id <loop_id>|loop status --id <loop_id>|resume --run <run_id>|dispute --run <id> ...|state prune ...|logs [--tail N] [--sessions] [--workspace <dir>]|--version|run ...>"
             );
             std::process::exit(2);
         }
