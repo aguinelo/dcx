@@ -2092,7 +2092,11 @@ async function loadDcxData(workspaceOverride?: string): Promise<void> {
     void renderLoops();
   } catch (error) {
     el('connection-state').textContent = 'dcode offline';
-    showNotice('dcode indisponível', error instanceof Error ? error.message : String(error), true);
+    const detail = error instanceof Error ? error.message : String(error);
+    const hint = detail.includes('ECONNREFUSED') || detail.includes('connect')
+      ? 'O daemon dcode não está respondendo. Se você está em modo de desenvolvimento, inicie o daemon com: cargo run -p dcx-cli --bin dcxd -- --bind 127.0.0.1:8787'
+      : detail;
+    showNotice('dcode indisponível', hint, true);
     renderStaticRegions('Workspace não selecionado');
   }
 }

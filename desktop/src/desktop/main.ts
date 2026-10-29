@@ -479,7 +479,11 @@ ipcMain.handle('auth:status', async () => {
   }
 });
 ipcMain.handle('auth:logout', async () => {
-  await runClaudeAuth(['logout']);
+  try {
+    await runClaudeAuth(['logout']);
+  } catch {
+    // claude CLI not installed — nothing to log out from
+  }
   return { loggedIn: false };
 });
 ipcMain.handle('settings:setup', (_event, workspace: string) =>
