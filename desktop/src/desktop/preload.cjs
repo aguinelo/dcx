@@ -59,6 +59,10 @@ contextBridge.exposeInMainWorld('repl', {
   setup: (workspace) => ipcRenderer.invoke('settings:setup', workspace),
   setCredentials: (workspace, provider, apiKey) =>
     ipcRenderer.invoke('settings:setCredentials', workspace, provider, apiKey),
+  compactSession: (workspace, sessionId) => ipcRenderer.invoke('dcx:compactSession', workspace, sessionId),
+  pickFile: () => ipcRenderer.invoke('env:pickFile'),
+  which: (cmd) => ipcRenderer.invoke('env:which', cmd),
+  openExternal: (url) => ipcRenderer.invoke('env:openExternal', url),
   promote: (workspace, sessionId) => ipcRenderer.invoke('dcx:promote', workspace, sessionId),
   approve: (workspace, sessionId) => ipcRenderer.invoke('dcx:approve', workspace, sessionId),
   start: (workspace, sessionId) => ipcRenderer.invoke('dcx:start', workspace, sessionId),

@@ -439,6 +439,28 @@ ipcMain.handle('dcx:searchSessions', (_event, workspace: string, query: string) 
 ipcMain.handle('dcx:routines', (_event, workspace: string) => getDcxClient().routines(workspace));
 ipcMain.handle('dcx:saveRoutine', (_event, workspace: string, routine: { id?: string; title: string; prompt: string; interval_hours: number | null }) => getDcxClient().saveRoutine(workspace, routine));
 ipcMain.handle('dcx:deleteRoutine', (_event, workspace: string, id: string) => getDcxClient().deleteRoutine(workspace, id));
+ipcMain.handle('dcx:compactSession', (_event, workspace: string, sessionId: string) => getDcxClient().compactSession(workspace, sessionId));
+
+ipcMain.handle('env:pickFile', async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] });
+  return result.canceled ? [] : result.filePaths;
+});
+
+ipcMain.handle('env:which', async (_event, cmd: string) => {
+  const { execFile: execFileFn } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  try {
+    const { stdout } = await promisify(execFileFn)('which', [cmd]);
+    return { path: stdout.trim() };
+  } catch {
+    return { path: null };
+  }
+});
+
+ipcMain.handle('env:openExternal', (_event, url: string) => {
+  const allowed = ['https://cli.github.com', 'https://claude.ai', 'https://github.com/anthropics'];
+  if (allowed.some((prefix) => url.startsWith(prefix))) return shell.openExternal(url);
+});
 
 ipcMain.handle('auth:status', async () => {
   try {

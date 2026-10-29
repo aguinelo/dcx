@@ -870,6 +870,35 @@ pub fn session(workspace: &Path, session_id: &str) -> Result<ChatSession, String
     load_session(workspace, session_id)
 }
 
+pub struct CompactResult {
+    pub kept: usize,
+    pub removed: usize,
+}
+
+/// Truncates a session to at most `keep_last` messages, preserving the most
+/// recent ones. Returns how many messages were kept and removed.
+pub fn compact_session(
+    workspace: &Path,
+    session_id: &str,
+    keep_last: usize,
+) -> Result<CompactResult, String> {
+    let mut session = load_session(workspace, session_id)?;
+    let total = session.messages.len();
+    if total <= keep_last {
+        return Ok(CompactResult {
+            kept: total,
+            removed: 0,
+        });
+    }
+    let removed = total - keep_last;
+    session.messages.drain(..removed);
+    save_session(workspace, &mut session)?;
+    Ok(CompactResult {
+        kept: keep_last,
+        removed,
+    })
+}
+
 /// Converts an exploratory session into the request consumed by the normal
 /// contract/sensor/run flow. This does not execute anything or modify files.
 pub fn request_from_session(workspace: &Path, session_id: &str) -> Result<String, String> {
@@ -1432,6 +1461,67 @@ mod tests {
         );
 
         fs::remove_dir_all(workspace).expect("limpar workspace");
+    }
+
+    #[test]
+    fn compact_session_keeps_recent_messages_and_removes_older_ones() {
+        let workspace = std::env::temp_dir().join(format!("dcx-compact-{}", new_session_id()));
+        fs::create_dir_all(&workspace).expect("workspace");
+        let mut session = new_session(&workspace).expect("sessão");
+        for i in 0..10u32 {
+            session.messages.push(ChatMessage {
+                role: if i % 2 == 0 { "user" } else { "assistant" }.to_owned(),
+                content: format!("mensagem {i}"),
+                created_at_unix_ms: u64::from(i),
+                cost_usd: None,
+                duration_ms: None,
+                input_tokens: None,
+                output_tokens: None,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            });
+        }
+        let session_id = session.session_id.clone();
+        save_session(&workspace, &mut session).expect("salvar");
+
+        let result = compact_session(&workspace, &session_id, 4).expect("compactar");
+        assert_eq!(result.kept, 4);
+        assert_eq!(result.removed, 6);
+
+        let reloaded = load_session(&workspace, &session_id).expect("recarregar");
+        assert_eq!(reloaded.messages.len(), 4);
+        assert_eq!(reloaded.messages[0].content, "mensagem 6");
+        assert_eq!(reloaded.messages[3].content, "mensagem 9");
+
+        fs::remove_dir_all(workspace).expect("limpar");
+    }
+
+    #[test]
+    fn compact_session_does_nothing_when_messages_fit() {
+        let workspace = std::env::temp_dir().join(format!("dcx-compact2-{}", new_session_id()));
+        fs::create_dir_all(&workspace).expect("workspace");
+        let mut session = new_session(&workspace).expect("sessão");
+        for i in 0..3u32 {
+            session.messages.push(ChatMessage {
+                role: "user".to_owned(),
+                content: format!("msg {i}"),
+                created_at_unix_ms: u64::from(i),
+                cost_usd: None,
+                duration_ms: None,
+                input_tokens: None,
+                output_tokens: None,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            });
+        }
+        let session_id = session.session_id.clone();
+        save_session(&workspace, &mut session).expect("salvar");
+
+        let result = compact_session(&workspace, &session_id, 20).expect("compactar");
+        assert_eq!(result.kept, 3);
+        assert_eq!(result.removed, 0);
+
+        fs::remove_dir_all(workspace).expect("limpar");
     }
 
     #[test]

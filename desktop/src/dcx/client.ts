@@ -295,6 +295,10 @@ export class DcxClient {
     return this.post('/sessions/pin', { workspace, session_id: sessionId, pinned });
   }
 
+  async compactSession(workspace: string, sessionId: string): Promise<{ kept: number; removed: number }> {
+    return this.post('/sessions/compact', { workspace, session_id: sessionId });
+  }
+
   async session(workspace: string, sessionId: string): Promise<DcxSessionDetail> {
     return this.get(
       `/session?workspace=${encodeURIComponent(workspace)}&session_id=${encodeURIComponent(sessionId)}`,

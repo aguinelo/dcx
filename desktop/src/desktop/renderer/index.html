@@ -22,12 +22,12 @@
         <button class="project-chip" id="project-chip">repl <span class="chev">▾</span></button>
       </div>
       <div class="titlebar__right">
-        <button class="iconbtn" title="Atalhos">⌘</button>
+        <button class="iconbtn" data-action="open-shortcuts" title="Atalhos">⌘</button>
         <button class="iconbtn" data-action="terminal" title="Terminal">>_</button>
-        <button class="iconbtn" title="Painel">▣</button>
-        <button class="iconbtn" title="Globo">⊕</button>
-        <button class="iconbtn" title="Projetos">▢</button>
-        <button class="iconbtn" title="Mais">⋯</button>
+        <button class="iconbtn" data-action="toggle-panel" title="Painel">▣</button>
+        <button class="iconbtn" data-action="toggle-web" title="Busca web">⊕</button>
+        <button class="iconbtn" data-action="new" title="Novo">▢</button>
+        <button class="iconbtn" data-action="mais-menu" title="Mais">⋯</button>
       </div>
     </header>
 
@@ -39,8 +39,8 @@
         <button class="navitem" data-action="search"><span class="glyph">⌕</span><span>Procurar</span></button>
           <button class="navitem" data-action="artifacts"><span class="glyph">▧</span><span>Artefatos</span></button>
           <button class="navitem" data-action="routines"><span class="glyph">◴</span><span>Rotinas</span></button>
-          <button class="navitem"><span class="glyph">◑</span><span>Personalização</span></button>
-          <button class="navitem"><span class="glyph">⋯</span><span>Mais</span></button>
+          <button class="navitem" data-action="personalizar"><span class="glyph">◑</span><span>Personalização</span></button>
+          <button class="navitem" data-action="mais"><span class="glyph">⋯</span><span>Mais</span></button>
         </nav>
 
         <div class="sidebar__scroll" id="sidebar-scroll">
@@ -130,7 +130,7 @@
         <div class="composer">
           <div id="notice" hidden></div>
           <div class="composer__box">
-            <button class="composer__attach" title="Anexar">+</button>
+            <button class="composer__attach" type="button" title="Anexar">+</button>
             <textarea id="input" rows="1" placeholder="Digite / para comandos" aria-label="Mensagem"></textarea>
             <button class="composer__mic" title="Voz">◉</button>
           </div>
@@ -150,11 +150,6 @@
         <section class="panel__section">
           <h2 class="panel__title">Ambiente <span class="chev">▾</span></h2>
           <ul class="envlist" id="env"></ul>
-          <div class="toggle-row">
-            <span class="glyph">↖</span>
-            <span>Remote Control</span>
-            <button class="toggle" role="switch" aria-checked="false"><span></span></button>
-          </div>
         </section>
 
         <section class="panel__section">
@@ -169,15 +164,8 @@
           <ul class="breakdown" id="breakdown"></ul>
           <div class="breakdown__foot">
             <span class="muted" id="ctx-headroom"></span>
-            <button class="btn">Compactar sessão</button>
+            <button class="btn" data-action="compact-session">Compactar sessão</button>
           </div>
-        </section>
-
-        <section class="panel__section panel__section--tight">
-          <h2 class="panel__title">
-            Conectores <span class="chev">▾</span>
-            <span class="badge" id="connectors">0 para reconectar</span>
-          </h2>
         </section>
 
         <section class="panel__section panel__section--tight" id="bg-section">
@@ -305,6 +293,12 @@
         <button class="btn" id="setup-save-btn">Salvar e começar</button>
         <div id="setup-error" class="muted setup-error" hidden></div>
       </div>
+    </div>
+
+    <div class="mais-menu" id="mais-menu" hidden>
+      <button class="mais-menu__item" data-action="open-shortcuts">Atalhos de teclado</button>
+      <a class="mais-menu__item" href="https://cli.github.com" data-action="open-external">Documentação gh</a>
+      <a class="mais-menu__item" href="https://github.com/anthropics/claude-code/issues" data-action="open-external">Reportar problema</a>
     </div>
 
     <script type="module" src="./renderer.js"></script>

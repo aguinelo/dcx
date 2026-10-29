@@ -92,6 +92,10 @@ interface ReplBridge {
   setCredentials(workspace: string, provider: 'minimax' | 'claude', apiKey: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   terminalRun(workspace: string, command: string): Promise<{ cancelled: boolean; stdout: string; exitCode: number; timedOut: boolean }>;
   terminalRestart(workspace: string): Promise<boolean>;
+  compactSession(workspace: string, sessionId: string): Promise<{ kept: number; removed: number }>;
+  pickFile(): Promise<string[]>;
+  which(cmd: string): Promise<{ path: string | null }>;
+  openExternal(url: string): Promise<void>;
 }
 
 const bridge = (window as unknown as { repl: ReplBridge }).repl;
@@ -129,6 +133,10 @@ let currentRoutineIntervalHours: number | null = null;
 
 const CONTEXT_REPOS_KEY = 'dcx.contextRepos';
 const WORKSPACES_KEY = 'dcx.workspaces';
+
+const sessionHistory: string[] = [];
+let sessionHistoryIndex = -1;
+let attachedFiles: string[] = [];
 
 function savedWorkspaces(): string[] {
   try {
@@ -614,11 +622,19 @@ function renderSessionLists(
   );
 }
 
+function pushSessionHistory(sessionId: string): void {
+  if (sessionHistory[sessionHistoryIndex] === sessionId) return;
+  sessionHistory.splice(sessionHistoryIndex + 1);
+  sessionHistory.push(sessionId);
+  sessionHistoryIndex = sessionHistory.length - 1;
+}
+
 async function loadSession(workspace: string, sessionId: string): Promise<void> {
   try {
     const session = await bridge.session(workspace, sessionId);
     currentWorkspace = workspace;
     currentSessionId = sessionId;
+    pushSessionHistory(sessionId);
     el<HTMLButtonElement>('promote-run').hidden = false;
     clearThinking();
     thread.replaceChildren();
@@ -796,9 +812,19 @@ function shellOpen(url: string): void {
 async function renderChanges(): Promise<void> {
   try {
     const { prs } = await bridge.githubPrs();
+    if (prs.length === 0) {
+      const { path: ghPath } = await bridge.which('gh').catch(() => ({ path: null }));
+      if (!ghPath) {
+        const li = document.createElement('li');
+        li.className = 'changes__empty';
+        li.innerHTML = 'GitHub CLI não encontrado. <a href="https://cli.github.com" data-action="open-external">Instalar gh</a>';
+        el<HTMLUListElement>('changes').replaceChildren(li);
+        return;
+      }
+    }
     el<HTMLUListElement>('changes').replaceChildren(...prs.map(changeNode));
   } catch {
-    // `gh` not installed or not logged in on this machine — leave it empty.
+    // `gh` not installed or not logged in — leave it empty.
   }
 }
 
@@ -1624,16 +1650,40 @@ function autoGrow(): void {
   input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
 }
 
+function renderAttachChips(): void {
+  const box = input.closest('.composer__box')!;
+  box.querySelectorAll('.attach-chip').forEach((c) => c.remove());
+  for (const filePath of attachedFiles) {
+    const chip = document.createElement('span');
+    chip.className = 'attach-chip';
+    chip.title = filePath;
+    chip.textContent = filePath.split('/').pop() ?? filePath;
+    const rm = document.createElement('button');
+    rm.textContent = '✕';
+    rm.addEventListener('click', () => {
+      attachedFiles = attachedFiles.filter((f) => f !== filePath);
+      renderAttachChips();
+    });
+    chip.appendChild(rm);
+    box.prepend(chip);
+  }
+}
+
 async function submit(): Promise<void> {
-  const prompt = input.value.trim();
-  if (prompt === '' || busy) return;
+  const rawPrompt = input.value.trim();
+  if (rawPrompt === '' || busy) return;
+  const prompt = attachedFiles.length > 0
+    ? `[Arquivos anexados: ${attachedFiles.join(', ')}]\n\n${rawPrompt}`
+    : rawPrompt;
+  attachedFiles = [];
+  renderAttachChips();
 
   busy = true;
   input.value = '';
   autoGrow();
   setPlaceholder();
   el<HTMLDivElement>('notice').hidden = true;
-  addUserMessage(prompt);
+  addUserMessage(rawPrompt);
   setThinking(true);
 
   try {
@@ -1764,6 +1814,57 @@ function handleChromeAction(action: string): void {
       document.querySelectorAll('[data-session-id].is-active').forEach((node) => node.classList.remove('is-active'));
       input.focus();
       return;
+    case 'compact-session':
+      if (!currentSessionId) return;
+      void bridge.compactSession(currentWorkspace, currentSessionId).then((result) => {
+        showNotice(`Sessão compactada`, `${result.removed} mensagens removidas, ${result.kept} mantidas.`);
+        void loadSession(currentWorkspace, currentSessionId!);
+      }).catch((error: unknown) => {
+        showNotice('Erro ao compactar', error instanceof Error ? error.message : String(error), true);
+      });
+      return;
+    case 'personalizar':
+      el('theme-settings').hidden = false;
+      void loadSettings(currentWorkspace);
+      return;
+    case 'back':
+      if (sessionHistoryIndex > 0) {
+        sessionHistoryIndex--;
+        void loadSession(currentWorkspace, sessionHistory[sessionHistoryIndex]!);
+      }
+      return;
+    case 'forward':
+      if (sessionHistoryIndex < sessionHistory.length - 1) {
+        sessionHistoryIndex++;
+        void loadSession(currentWorkspace, sessionHistory[sessionHistoryIndex]!);
+      }
+      return;
+    case 'reload':
+      if (currentSessionId) void loadSession(currentWorkspace, currentSessionId);
+      return;
+    case 'toggle-code':
+      layout.dataset.code = layout.dataset.code === 'shown' ? 'hidden' : 'shown';
+      return;
+    case 'open-shortcuts':
+      showNotice('Atalhos', 'Enter → enviar · Shift+Enter → nova linha · Esc → cancelar');
+      return;
+    case 'toggle-web':
+      void bridge.config(currentWorkspace).then((config) => {
+        void bridge.setConfig(currentWorkspace, { web_enabled: !config.web_enabled }).then(() => {
+          showNotice(config.web_enabled ? 'Busca web desativada' : 'Busca web ativada', '');
+        });
+      }).catch((error: unknown) => {
+        showNotice('Erro', error instanceof Error ? error.message : String(error), true);
+      });
+      return;
+    case 'mais':
+    case 'mais-menu': {
+      const maisMenu = document.getElementById('mais-menu');
+      if (maisMenu) maisMenu.hidden = !maisMenu.hidden;
+      return;
+    }
+    case 'open-external':
+      return;
     default:
   }
 }
@@ -1795,7 +1896,40 @@ document.addEventListener('click', (event) => {
     return;
   }
 
+  if (target.closest('.composer__attach')) {
+    void bridge.pickFile().then((paths) => {
+      attachedFiles = [...attachedFiles, ...paths];
+      renderAttachChips();
+    }).catch(() => {});
+    return;
+  }
+
+  if (target.closest('.composer__mic')) {
+    const win = window as unknown as Record<string, unknown>;
+    const SR = (win['SpeechRecognition'] ?? win['webkitSpeechRecognition']) as (new () => { lang: string; start(): void; onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null }) | undefined;
+    if (!SR) {
+      showNotice('Voz não suportada', 'Este navegador não suporta reconhecimento de voz.');
+      return;
+    }
+    const recognition = new SR();
+    recognition.lang = 'pt-BR';
+    recognition.onresult = (ev) => {
+      const transcript = ev.results[0]?.[0]?.transcript ?? '';
+      input.value += transcript;
+      input.dispatchEvent(new Event('input'));
+    };
+    recognition.onerror = () => showNotice('Voz', 'Não foi possível capturar áudio.');
+    recognition.start();
+    return;
+  }
+
   const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'open-external') {
+    const anchor = target.closest<HTMLAnchorElement>('a');
+    const href = anchor?.href;
+    if (href) void bridge.openExternal(href).catch(() => {});
+    return;
+  }
   if (action === 'add-context-repo') {
     event.stopPropagation();
     void addContextRepo();

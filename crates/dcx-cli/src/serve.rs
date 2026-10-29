@@ -95,6 +95,12 @@ struct SetCredentialsRequest {
     api_key: String,
 }
 
+#[derive(Deserialize)]
+struct CompactSessionRequest {
+    workspace: String,
+    session_id: String,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     crate::scheduler::start();
     let listener = TcpListener::bind(bind)
@@ -194,6 +200,7 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/runs/artifacts") => handle_artifacts(&mut stream, query),
         ("GET", "/runs/catalog") => handle_run_catalog(&mut stream, query),
         ("GET", "/runs/artifact") => handle_artifact_content(&mut stream, query),
+        ("POST", "/sessions/compact") => handle_compact_session(&mut stream, body),
         ("GET", "/config") => handle_get_config(&mut stream, query),
         ("POST", "/config") => handle_set_config(&mut stream, body),
         ("GET", "/account") => handle_account(&mut stream, query),
@@ -870,6 +877,18 @@ fn handle_set_config(stream: &mut TcpStream, body: &str) -> Result<(), String> {
         stream,
         200,
         &serde_json::to_string(&config).map_err(|error| error.to_string())?,
+    )
+}
+
+fn handle_compact_session(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: CompactSessionRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let workspace = PathBuf::from(request.workspace);
+    let result = chat::compact_session(&workspace, &request.session_id, 20)?;
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({"kept": result.kept, "removed": result.removed}).to_string(),
     )
 }
 
