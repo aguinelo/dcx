@@ -457,6 +457,14 @@ ipcMain.handle('auth:logout', async () => {
   await runClaudeAuth(['logout']);
   return { loggedIn: false };
 });
+ipcMain.handle('settings:setup', (_event, workspace: string) =>
+  getDcxClient().setup(workspace),
+);
+ipcMain.handle(
+  'settings:setCredentials',
+  (_event, workspace: string, provider: string, apiKey: string) =>
+    getDcxClient().setCredentials(workspace, provider as 'minimax' | 'claude', apiKey),
+);
 ipcMain.handle('dcx:promote', (_event, workspace: string, sessionId: string) =>
   getDcxClient().promote(workspace, sessionId),
 );

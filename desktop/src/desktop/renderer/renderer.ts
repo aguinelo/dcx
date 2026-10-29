@@ -88,6 +88,8 @@ interface ReplBridge {
   addContextRepo(workspace: string): Promise<string | undefined>;
   authStatus(): Promise<{ loggedIn: boolean; email?: string; orgName?: string; subscriptionType?: string; error?: string }>;
   authLogout(): Promise<{ loggedIn: boolean }>;
+  setup(workspace: string): Promise<{ provider: string | null; has_minimax_key: boolean; has_anthropic_key: boolean; has_claude_cli: boolean }>;
+  setCredentials(workspace: string, provider: 'minimax' | 'claude', apiKey: string): Promise<{ provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }>;
   terminalRun(workspace: string, command: string): Promise<{ cancelled: boolean; stdout: string; exitCode: number; timedOut: boolean }>;
   terminalRestart(workspace: string): Promise<boolean>;
 }
@@ -968,6 +970,55 @@ async function signOut(): Promise<void> {
   }
 }
 
+/* ── Setup / onboarding panel ───────────────────────────────── */
+
+function showSetupPanel(
+  workspace: string,
+  status: { has_claude_cli: boolean },
+): void {
+  const panel = el('setup-panel');
+  panel.hidden = false;
+
+  const radios = panel.querySelectorAll<HTMLInputElement>('input[name="setup-provider-radio"]');
+  const keyLabel = el('setup-key-label');
+  const claudeWarning = el('setup-claude-warning');
+  const keyInput = el<HTMLInputElement>('setup-api-key');
+  const saveBtn = el('setup-save-btn');
+  const errorEl = el('setup-error');
+
+  function updateProviderUI(): void {
+    const provider = [...radios].find((r) => r.checked)?.value ?? 'minimax';
+    keyLabel.textContent = provider === 'minimax' ? 'Chave MiniMax' : 'Chave Anthropic';
+    keyInput.placeholder = provider === 'minimax' ? 'mxXXXXXXXXXXXXXX' : 'sk-ant-XXXXXXXX';
+    claudeWarning.hidden = provider !== 'claude' || status.has_claude_cli;
+  }
+
+  for (const radio of radios) radio.addEventListener('change', updateProviderUI);
+  updateProviderUI();
+
+  saveBtn.addEventListener('click', async () => {
+    const provider = ([...radios].find((r) => r.checked)?.value ?? 'minimax') as 'minimax' | 'claude';
+    const apiKey = keyInput.value.trim();
+    if (!apiKey) {
+      errorEl.textContent = 'Insira a chave de API.';
+      errorEl.hidden = false;
+      return;
+    }
+    errorEl.hidden = true;
+    saveBtn.setAttribute('disabled', 'true');
+    try {
+      await bridge.setCredentials(workspace, provider, apiKey);
+      panel.hidden = true;
+      void loadDcxData(workspace);
+    } catch (error) {
+      errorEl.textContent = error instanceof Error ? error.message : String(error);
+      errorEl.hidden = false;
+    } finally {
+      saveBtn.removeAttribute('disabled');
+    }
+  });
+}
+
 function renderConfig(config: { provider: string; model?: string; web_enabled: boolean; max_tool_calls: number }): void {
   for (const input of el<HTMLDivElement>('settings-provider').querySelectorAll<HTMLInputElement>(
     'input[name="provider"]',
@@ -1684,6 +1735,13 @@ function handleChromeAction(action: string): void {
     case 'close-settings':
       el('theme-settings').hidden = true;
       return;
+    case 'open-setup':
+      el('theme-settings').hidden = true;
+      void bridge
+        .setup(currentWorkspace)
+        .catch(() => ({ provider: null, has_minimax_key: false, has_anthropic_key: false, has_claude_cli: false }))
+        .then((setupStatus) => showSetupPanel(currentWorkspace, setupStatus));
+      return;
     case 'account-menu':
       void openAccountMenu();
       return;
@@ -1868,6 +1926,18 @@ async function loadDcxData(workspaceOverride?: string): Promise<void> {
     }
     const workspace = workspaceOverride ?? savedWorkspace ?? await bridge.workspace();
     currentWorkspace = workspace;
+
+    // Show onboarding if no credentials are configured.
+    try {
+      const setupStatus = await bridge.setup(workspace);
+      if (!setupStatus.has_minimax_key && !setupStatus.has_anthropic_key) {
+        showSetupPanel(workspace, setupStatus);
+        return;
+      }
+    } catch {
+      // Daemon may not be running yet; continue to show normal error.
+    }
+
     renderStaticRegions(workspace);
     const connection = el('connection-state');
     connection.textContent = 'dcode conectado';

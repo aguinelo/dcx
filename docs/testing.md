@@ -253,6 +253,30 @@ Os tempos de E2E na tabela acima são da versão anterior, que cobria apenas cha
 
 Na primeira tentativa de `dcx run --request` real com MiniMax, três chamadas custaram US$ 0,7665 e levaram cerca de 215 s. O contrato gerado para criar um único arquivo trouxe nove sensores, incluindo verificações ligadas ao PID do teste e ao conteúdo interno do lock. Interrompi a tentativa antes da autoria dos sensores terminar; ela **não** passou pelo fluxo completo. O runner foi ajustado para preservar relatório e bundle em runs incompletos. Não repeti a chamada para evitar custo sem corrigir antes esse desvio.
 
+## Distribuição macOS
+
+O script `desktop/tools/package-macos.mjs` gera um DMG em `desktop/release/`:
+
+```sh
+cd desktop && node tools/package-macos.mjs
+```
+
+**Sem assinatura Apple Developer:** o macOS bloqueia o app na primeira abertura. Para abrir, clique com o botão direito no app → **Abrir** e confirme. Não afeta usuários que compilam e instalam localmente.
+
+**Para distribuição pública (App Store ou download direto):** é necessário um Apple Developer ID (US$ 99/ano em developer.apple.com). Antes de rodar o script, defina as variáveis de ambiente:
+
+```sh
+# Opção A: perfil de keychain com a identidade já cadastrada
+export APPLE_KEYCHAIN_PROFILE=<nome-do-perfil>
+
+# Opção B: credenciais diretas
+export APPLE_ID=<seu-apple-id>
+export APPLE_APP_SPECIFIC_PASSWORD=<senha-de-app-gerada-em-appleid.apple.com>
+export APPLE_TEAM_ID=<team-id-do-developer-account>
+```
+
+O script `desktop/tools/notarize.mjs` já lê essas variáveis e executa a notarização via `notarytool` após a compilação. Sem elas, a notarização é ignorada e o DMG é gerado sem assinatura (adequado para uso interno).
+
 ## O que ainda falta
 
 - E2E da interface Electron e do DMG empacotado.

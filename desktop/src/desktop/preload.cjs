@@ -56,6 +56,9 @@ contextBridge.exposeInMainWorld('repl', {
   addContextRepo: (workspace) => ipcRenderer.invoke('dcx:addContextRepo', workspace),
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
+  setup: (workspace) => ipcRenderer.invoke('settings:setup', workspace),
+  setCredentials: (workspace, provider, apiKey) =>
+    ipcRenderer.invoke('settings:setCredentials', workspace, provider, apiKey),
   promote: (workspace, sessionId) => ipcRenderer.invoke('dcx:promote', workspace, sessionId),
   approve: (workspace, sessionId) => ipcRenderer.invoke('dcx:approve', workspace, sessionId),
   start: (workspace, sessionId) => ipcRenderer.invoke('dcx:start', workspace, sessionId),

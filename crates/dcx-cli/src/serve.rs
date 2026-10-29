@@ -88,6 +88,13 @@ struct DeleteRoutineRequest {
     id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SetCredentialsRequest {
+    workspace: String,
+    provider: String,
+    api_key: String,
+}
+
 pub fn run(bind: &str) -> Result<(), String> {
     crate::scheduler::start();
     let listener = TcpListener::bind(bind)
@@ -193,6 +200,8 @@ fn handle(mut stream: TcpStream) -> Result<(), String> {
         ("GET", "/git/branch") => handle_git_branch(&mut stream, query),
         ("GET", "/github/repos") => handle_github_repos(&mut stream, query),
         ("GET", "/github/prs") => handle_github_prs(&mut stream, query),
+        ("GET", "/setup") => handle_setup(&mut stream, query),
+        ("POST", "/credentials") => handle_set_credentials(&mut stream, body),
         _ => respond_json(&mut stream, 404, r#"{"error":"rota não encontrada"}"#),
     }
 }
@@ -1163,6 +1172,74 @@ fn handle_chat(stream: &mut TcpStream, body: &str) -> Result<(), String> {
     }
 }
 
+fn claude_cli_in_path() -> bool {
+    std::process::Command::new("which")
+        .arg("claude")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn handle_setup(stream: &mut TcpStream, query: &str) -> Result<(), String> {
+    let workspace = query_value(query, "workspace")
+        .map(|w| {
+            percent_decode(&w)
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(&w))
+        })
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let provider = crate::env_file::value(&workspace, "DCX_CHAT_PROVIDER");
+    let has_minimax_key = crate::env_file::value(&workspace, "MINIMAX_API_KEY").is_some()
+        || crate::env_file::value(&workspace, "DCX_MINIMAX_API_KEY").is_some();
+    let has_anthropic_key = crate::env_file::value(&workspace, "ANTHROPIC_API_KEY").is_some();
+    let has_claude_cli = claude_cli_in_path();
+    respond_json(
+        stream,
+        200,
+        &serde_json::json!({
+            "provider": provider,
+            "has_minimax_key": has_minimax_key,
+            "has_anthropic_key": has_anthropic_key,
+            "has_claude_cli": has_claude_cli,
+        })
+        .to_string(),
+    )
+}
+
+fn handle_set_credentials(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    let request: SetCredentialsRequest = serde_json::from_str(body.trim())
+        .map_err(|error| format!("corpo JSON inválido: {error}"))?;
+    let workspace = PathBuf::from(&request.workspace);
+    let normalized = request.provider.to_ascii_lowercase();
+    if normalized != "claude" && normalized != "minimax" {
+        return respond_json(
+            stream,
+            400,
+            &serde_json::json!({"error": "provider desconhecido; use claude ou minimax"})
+                .to_string(),
+        );
+    }
+    let key_name = if normalized == "minimax" {
+        "MINIMAX_API_KEY"
+    } else {
+        "ANTHROPIC_API_KEY"
+    };
+    crate::env_file::set_values(
+        &workspace,
+        &[
+            ("DCX_CHAT_PROVIDER", normalized.clone()),
+            ("DCX_PROVIDER", normalized.clone()),
+            (key_name, request.api_key.clone()),
+        ],
+    )?;
+    let config = chat::config(&workspace);
+    respond_json(
+        stream,
+        200,
+        &serde_json::to_string(&config).map_err(|error| error.to_string())?,
+    )
+}
+
 fn respond_json(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), String> {
     let reason = match status {
         200 => "OK",
@@ -1223,5 +1300,66 @@ mod tests {
         assert!(excerpt.contains("Política de reembolso"));
         assert!(excerpt.starts_with('…'));
         assert!(excerpt.len() < content.len());
+    }
+
+    #[test]
+    fn set_credentials_writes_key_and_provider_to_env_file() {
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!(
+            "dcx-creds-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("workspace");
+        let body = serde_json::json!({
+            "workspace": dir.display().to_string(),
+            "provider": "minimax",
+            "api_key": "test-key-12345",
+        })
+        .to_string();
+        let request: SetCredentialsRequest =
+            serde_json::from_str(&body).expect("parse SetCredentialsRequest");
+        let workspace = PathBuf::from(&request.workspace);
+        let normalized = request.provider.to_ascii_lowercase();
+        let key_name = "MINIMAX_API_KEY";
+        crate::env_file::set_values(
+            &workspace,
+            &[
+                ("DCX_CHAT_PROVIDER", normalized.clone()),
+                ("DCX_PROVIDER", normalized.clone()),
+                (key_name, request.api_key.clone()),
+            ],
+        )
+        .expect("set_values");
+        let env_path = dir.join(".env");
+        let contents = fs::read_to_string(&env_path).expect(".env written");
+        assert!(contents.contains("MINIMAX_API_KEY=test-key-12345"));
+        assert!(contents.contains("DCX_CHAT_PROVIDER=minimax"));
+        assert!(contents.contains("DCX_PROVIDER=minimax"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn setup_detects_missing_keys() {
+        let dir = std::env::temp_dir().join(format!(
+            "dcx-setup-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("workspace");
+        let has_minimax = crate::env_file::value(&dir, "MINIMAX_API_KEY").is_some()
+            || crate::env_file::value(&dir, "DCX_MINIMAX_API_KEY").is_some();
+        let has_anthropic = crate::env_file::value(&dir, "ANTHROPIC_API_KEY").is_some();
+        // Fresh workspace has no keys.
+        assert!(!has_minimax, "fresh workspace should have no minimax key");
+        assert!(
+            !has_anthropic,
+            "fresh workspace should have no anthropic key"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

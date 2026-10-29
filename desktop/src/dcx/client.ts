@@ -226,6 +226,23 @@ export class DcxClient {
     return this.post('/config', { workspace, ...updates });
   }
 
+  async setup(workspace: string): Promise<{
+    provider: string | null;
+    has_minimax_key: boolean;
+    has_anthropic_key: boolean;
+    has_claude_cli: boolean;
+  }> {
+    return this.get(`/setup?workspace=${encodeURIComponent(workspace)}`);
+  }
+
+  async setCredentials(
+    workspace: string,
+    provider: 'minimax' | 'claude',
+    apiKey: string,
+  ): Promise<DcxConfig> {
+    return this.post('/credentials', { workspace, provider, api_key: apiKey });
+  }
+
   async account(workspace: string): Promise<DcxAccount> {
     return this.get(`/account?workspace=${encodeURIComponent(workspace)}`);
   }

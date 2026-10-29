@@ -263,7 +263,47 @@
           <div class="themes" id="themes" role="radiogroup" aria-label="Tema"></div>
         </section>
 
+        <button class="btn btn--secondary" data-action="open-setup">Configurar credenciais</button>
         <button class="btn" data-action="close-settings">Fechar</button>
+      </div>
+    </div>
+
+    <div class="theme-settings" id="setup-panel" hidden>
+      <div class="theme-settings__card">
+        <h2>Configurar dcode</h2>
+        <p class="muted">Escolha seu provedor e adicione a chave de API para começar.</p>
+
+        <section class="settings-section">
+          <h3>Provedor</h3>
+          <div class="settings-row" id="setup-provider" role="radiogroup" aria-label="Provedor">
+            <label class="settings-option">
+              <input type="radio" name="setup-provider-radio" value="minimax" checked />
+              <span>MiniMax</span>
+            </label>
+            <label class="settings-option">
+              <input type="radio" name="setup-provider-radio" value="claude" />
+              <span>Claude</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Chave de API</h3>
+          <div class="settings-row">
+            <label class="settings-option settings-option--field">
+              <span id="setup-key-label">Chave MiniMax</span>
+              <input type="password" id="setup-api-key" placeholder="Chave de API" autocomplete="off" />
+            </label>
+          </div>
+          <div id="setup-claude-warning" class="muted" hidden>
+            ⚠ Claude CLI não encontrado. Instale em
+            <a href="https://claude.ai/code" id="setup-claude-link">claude.ai/code</a>
+            e faça login com <code>claude auth login</code>.
+          </div>
+        </section>
+
+        <button class="btn" id="setup-save-btn">Salvar e começar</button>
+        <div id="setup-error" class="muted setup-error" hidden></div>
       </div>
     </div>
 

@@ -322,9 +322,13 @@ impl ClaudeChatProvider {
         command.arg(prompt);
 
         let started = Instant::now();
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("não foi possível iniciar Claude CLI: {error}"))?;
+        let mut child = command.spawn().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                "Claude CLI não encontrado. Instale em claude.ai/code e faça login com `claude auth login`.".to_owned()
+            } else {
+                format!("não foi possível iniciar Claude CLI: {error}")
+            }
+        })?;
         let stdout = child
             .stdout
             .take()
@@ -566,7 +570,8 @@ fn system_prompt(workspace: &Path, web_enabled: bool, context_workspaces: &[Path
          É obrigatório responder em português do Brasil (pt-BR), mesmo que o histórico, os arquivos ou a pergunta estejam em outro idioma. Não responda em inglês, salvo quando o usuário pedir explicitamente. Isso vale também para as frases curtas que você escreve antes de usar uma ferramenta.\n\
          Você pode ler arquivos e buscar no projeto com Read, Glob e Grep. {} Nunca edite, crie, apague ou execute comandos; não use Bash ou subagentes. Não altere o projeto. Faça buscas direcionadas, não repita uma busca que não encontrou resultados e leia apenas os arquivos necessários para responder.\n\
          Converse sobre o projeto, tire dúvidas de arquitetura e ajude o usuário a decidir o próximo passo. Se o usuário pedir para criar, editar, apagar arquivos ou implementar algo, recuse imediatamente, sem usar ferramentas e sem investigar o projeto para justificar: diga em uma ou duas frases que a conversa é somente leitura e que, para fazer a mudança, ele pode usar \"Promover para execução\" (ou `dcx run`), que cria um contrato com critérios de aceite antes de alterar o projeto.\n\
-         Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.",
+         Responda de forma direta. Se precisar de contexto, leia os arquivos relevantes antes de responder. Não invente conteúdo de arquivos.\n\
+         Nunca se apresente nem use cumprimentos automáticos como abertura. Se a primeira mensagem do usuário for apenas uma saudação curta (\"oi\", \"hey\" ou similar), responda com uma única pergunta concisa perguntando no que pode ajudar, como \"O que posso fazer por você?\". Adapte o tom ao do usuário: se ele for informal ou bem-humorado, seja informal e retribua o humor; se for sério e técnico, seja cordial e direto. Nunca force um tom formal quando o usuário é descontraído.",
         workspace.display(),
         if web_enabled {
             "Quando houver contexto marcado como PESQUISA WEB DO DCODE, use somente essas fontes, cite as URLs e não tente pesquisar novamente. Se esse contexto não existir, diga que a informação atual não foi verificada; nunca invente dados."
@@ -1427,5 +1432,27 @@ mod tests {
         );
 
         fs::remove_dir_all(workspace).expect("limpar workspace");
+    }
+
+    #[test]
+    fn system_prompt_does_not_introduce_itself() {
+        let workspace = Path::new("/tmp/dcx-chat-test");
+        let prompt = system_prompt(workspace, false, &[]);
+        assert!(
+            !prompt.contains("Olá"),
+            "system prompt must not contain a greeting"
+        );
+        assert!(
+            !prompt.contains("Sou o dcode"),
+            "system prompt must not introduce the assistant by name"
+        );
+        assert!(
+            prompt.contains("Nunca se apresente"),
+            "system prompt must instruct the model not to introduce itself"
+        );
+        assert!(
+            prompt.contains("Adapte o tom ao do usuário"),
+            "system prompt must instruct the model to adapt tone to user"
+        );
     }
 }
