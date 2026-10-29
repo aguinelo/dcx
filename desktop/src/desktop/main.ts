@@ -73,11 +73,17 @@ async function startDcxIfNeeded(): Promise<void> {
     });
   }
 
+  const daemonStderr: string[] = [];
   managedDcx = spawn(command.command, command.args, {
     cwd: getDcxWorkspace(),
     env: process.env,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
     windowsHide: true,
+  });
+  managedDcx.stderr?.on('data', (chunk: Buffer) => {
+    const line = chunk.toString().trim();
+    if (line) daemonStderr.push(line);
+    if (daemonStderr.length > 20) daemonStderr.shift();
   });
   managedDcx.on('error', (error) => {
     console.error(`Falha ao iniciar o daemon dcode: ${error.message}`);
@@ -85,8 +91,9 @@ async function startDcxIfNeeded(): Promise<void> {
 
   for (let attempt = 0; attempt < 40; attempt += 1) {
     if (managedDcx.exitCode !== null) {
+      const detail = daemonStderr.slice(-5).join('\n') || '(sem saída)';
       throw new Error(
-        `O daemon dcode encerrou durante a inicialização (código ${managedDcx.exitCode}).`,
+        `O daemon dcode encerrou durante a inicialização (código ${managedDcx.exitCode}):\n${detail}`,
       );
     }
     try {
@@ -98,7 +105,8 @@ async function startDcxIfNeeded(): Promise<void> {
   }
   managedDcx.kill('SIGTERM');
   managedDcx = undefined;
-  throw new Error('O daemon dcode não respondeu em até 10 segundos.');
+  const detail = daemonStderr.slice(-5).join('\n') || '(sem saída)';
+  throw new Error(`O daemon dcode não respondeu em até 10 segundos.\n${detail}`);
 }
 
 /** Shells out to the same `claude` CLI the chat provider uses, so the account
@@ -217,6 +225,16 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   buildMenu();
+  // Remove macOS quarantine from the entire app bundle on first launch so that
+  // bundled binaries (dcxd, dcx) can be executed without Gatekeeper blocking.
+  if (app.isPackaged && process.platform === 'darwin') {
+    await new Promise<void>((resolve) => {
+      const bundlePath = path.resolve(process.resourcesPath, '..', '..');
+      const xattr = spawn('xattr', ['-dr', 'com.apple.quarantine', bundlePath]);
+      xattr.on('close', () => resolve());
+      xattr.on('error', () => resolve());
+    });
+  }
   try {
     await startDcxIfNeeded();
   } catch (error) {
