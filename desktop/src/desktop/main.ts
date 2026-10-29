@@ -62,6 +62,17 @@ async function startDcxIfNeeded(): Promise<void> {
     );
   }
 
+  // On macOS, unsigned binaries downloaded or bundled inside an unsigned app are
+  // quarantined by Gatekeeper and cannot be spawned. Remove the quarantine flag
+  // before the first launch so the OS allows the process.
+  if (app.isPackaged && process.platform === 'darwin') {
+    await new Promise<void>((resolve) => {
+      const xattr = spawn('xattr', ['-dr', 'com.apple.quarantine', command.command]);
+      xattr.on('close', () => resolve());
+      xattr.on('error', () => resolve()); // xattr not available — ignore
+    });
+  }
+
   managedDcx = spawn(command.command, command.args, {
     cwd: getDcxWorkspace(),
     env: process.env,
